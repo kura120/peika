@@ -117,11 +117,25 @@ pub struct FlowPref {
     pub replacements: Vec<(String, String)>,
     /// Words spelled the way the user spells them ("Supabase").
     pub dictionary: Vec<String>,
+    /// A phrase to say and the whole text it stands for: ("my address", "12 Rue ...").
+    pub snippets: Vec<(String, String)>,
+    /// The user's own style for an app, over the built-in ones (flow/style.rs):
+    /// (program, "verbatim" | "clean" | "sentences"), the program being its
+    /// executable without ".exe" ("slack"). An app not listed here nor built in
+    /// is clean.
+    pub styles: Vec<(String, String)>,
 }
 
 impl Default for FlowPref {
     fn default() -> Self {
-        Self { enabled: false, key: "RightCtrl".into(), replacements: Vec::new(), dictionary: Vec::new() }
+        Self {
+            enabled: false,
+            key: "RightCtrl".into(),
+            replacements: Vec::new(),
+            dictionary: Vec::new(),
+            snippets: Vec::new(),
+            styles: Vec::new(),
+        }
     }
 }
 
@@ -557,7 +571,7 @@ mod tests {
   "cryptoCurrency": "EUR",
   "cryptoCoins": "DOGE, ADA",
   "awayMinutes": 25,
-  "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"] }
+  "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"], "snippets": [["my address", "12 Rue Pasteur"]], "styles": [["slack", "sentences"]] }
 }"##;
 
     fn custom() -> Value {
@@ -791,6 +805,7 @@ mod tests {
         assert!(!loaded.flow.enabled);
         assert_eq!(loaded.flow.key, "RightCtrl");
         assert!(loaded.flow.replacements.is_empty() && loaded.flow.dictionary.is_empty());
+        assert!(loaded.flow.snippets.is_empty() && loaded.flow.styles.is_empty());
         assert_eq!(loaded.peika_outfit, "witchHat");
     }
 
@@ -800,6 +815,31 @@ mod tests {
         assert!(loaded.flow.enabled);
         assert_eq!(loaded.flow.key, "RightCtrl");
         assert!(loaded.flow.dictionary.is_empty());
+        // A settings.json from before snippets and styles has neither.
+        assert!(loaded.flow.snippets.is_empty() && loaded.flow.styles.is_empty());
+    }
+
+    #[test]
+    fn flow_s_snippets_and_styles_survive_a_save_and_a_load() {
+        let (dir, file) = scratch("flow-styles");
+        let mut settings = Settings::default();
+        settings.flow.snippets = vec![("my address".into(), "12 Rue Pasteur,
+75011 Paris".into())];
+        settings.flow.styles = vec![("slack".into(), "sentences".into()), ("code".into(), "clean".into())];
+        save_to(&file, &settings).unwrap();
+        let loaded = load_from(&file);
+        assert_eq!(loaded.flow, settings.flow);
+        let raw: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(raw["flow"]["snippets"], json!([["my address", "12 Rue Pasteur,
+75011 Paris"]]));
+        assert_eq!(raw["flow"]["styles"], json!([["slack", "sentences"], ["code", "clean"]]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_style_this_build_does_not_know_is_kept_as_written() {
+        let loaded = parse(&custom_with("flow", Some(json!({ "styles": [["slack", "poetic"]] })))).unwrap();
+        assert_eq!(loaded.flow.styles, vec![("slack".to_string(), "poetic".to_string())]);
     }
 
     #[test]
