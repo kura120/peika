@@ -13,20 +13,37 @@ export const FLOW_KEY_LABELS: Record<FlowKeyName, string> = {
   RightShift: "Right Shift",
 };
 
+/** How the words are written (src-tauri/src/flow/style.rs): as said, without fillers and with a full stop, or in full sentences. */
+export const FLOW_STYLES = ["verbatim", "clean", "sentences"] as const;
+export type FlowStyle = (typeof FLOW_STYLES)[number];
+
 export interface FlowPref {
   enabled: boolean;
   key: string;
   /** What is said, what is written instead. */
   replacements: [string, string][];
   dictionary: string[];
+  /** A phrase to say, the text it stands for. */
+  snippets: [string, string][];
+  /** The user's own style for a program (its executable without ".exe"), over the built-in ones. */
+  styles: [string, string][];
 }
 
-export const DEFAULT_FLOW: FlowPref = { enabled: false, key: "RightCtrl", replacements: [], dictionary: [] };
+export const DEFAULT_FLOW: FlowPref = {
+  enabled: false,
+  key: "RightCtrl",
+  replacements: [],
+  dictionary: [],
+  snippets: [],
+  styles: [],
+};
 
 /** Entries a list may hold: a dictionary is not a database. */
 export const MAX_ENTRIES = 200;
 /** The longest a phrase or a word may be. */
 export const MAX_LENGTH = 200;
+/** The longest a snippet's text may be: an address, a signature, a paragraph. */
+export const MAX_SNIPPET = 2000;
 
 /** A key name as one of ours; a name this build does not know reads as right Ctrl, as Rust does. */
 export function flowKeyName(key: unknown): FlowKeyName {
@@ -48,6 +65,48 @@ export function addReplacement(list: [string, string][], from: string, to: strin
   if (at >= 0) return list.map((entry, i): [string, string] => (i === at ? [f, t] : entry));
   if (list.length >= MAX_ENTRIES) return null;
   return [...list, [f, t]];
+}
+
+/** `list` with a snippet added: a phrase to say and its text, which may have line breaks. The same phrase again replaces the first. */
+export function addSnippet(list: [string, string][], trigger: string, text: string): [string, string][] | null {
+  const tr = trigger.trim();
+  const tx = text.trim();
+  if (!tr || !tx || tr.length > MAX_LENGTH || tx.length > MAX_SNIPPET) return null;
+  const at = list.findIndex(([existing]) => same(existing, tr));
+  if (at >= 0) return list.map((entry, i): [string, string] => (i === at ? [tr, tx] : entry));
+  if (list.length >= MAX_ENTRIES) return null;
+  return [...list, [tr, tx]];
+}
+
+/** What is typed in the one-line field as a line break ("\\n") becomes one. */
+export function lineBreaks(typed: string): string {
+  return typed.replace(/\\n/g, "\n");
+}
+
+/** A snippet's text on one line for the list: its line breaks shown as an arrow. */
+export function showBreaks(text: string): string {
+  return text.replace(/\r?\n/g, " \u21b5 ");
+}
+
+/** A program as the styles list keeps it: "Slack.exe" is "slack", as Rust reads it (flow/style.rs `app_key`). */
+export function appKey(program: string): string {
+  const lower = program.trim().toLowerCase();
+  return (lower.endsWith(".exe") ? lower.slice(0, -4) : lower).trim();
+}
+
+/** A style name as one of ours; one this build does not know reads as clean, as Rust does. */
+export function flowStyleName(style: unknown): FlowStyle {
+  return FLOW_STYLES.find((s) => s === style) ?? "clean";
+}
+
+/** `list` with a program's style set, replacing the one it had; null for a program with no name, one that is too long, or too many. */
+export function setStyle(list: [string, string][], program: string, style: string): [string, string][] | null {
+  const app = appKey(program);
+  if (!app || app.length > MAX_LENGTH || !FLOW_STYLES.some((s) => s === style)) return null;
+  const at = list.findIndex(([existing]) => appKey(existing) === app);
+  if (at >= 0) return list.map((entry, i): [string, string] => (i === at ? [app, style] : entry));
+  if (list.length >= MAX_ENTRIES) return null;
+  return [...list, [app, style]];
 }
 
 /** `list` with a word added; null when it is empty, too long, already there (whatever its case) or too many. */
@@ -77,12 +136,14 @@ export interface FlowPillState {
 export function normalizeFlow(raw: unknown): FlowPref {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<Record<keyof FlowPref, unknown>>;
   const text = (v: unknown): v is string => typeof v === "string";
+  const pairs = (v: unknown): [string, string][] =>
+    Array.isArray(v) ? v.filter((p): p is [string, string] => Array.isArray(p) && text(p[0]) && text(p[1])).map(([a, b]) => [a, b]) : [];
   return {
     enabled: r.enabled === true,
     key: text(r.key) ? r.key : DEFAULT_FLOW.key,
-    replacements: Array.isArray(r.replacements)
-      ? r.replacements.filter((p): p is [string, string] => Array.isArray(p) && text(p[0]) && text(p[1])).map(([a, b]) => [a, b])
-      : [],
+    replacements: pairs(r.replacements),
     dictionary: Array.isArray(r.dictionary) ? r.dictionary.filter(text) : [],
+    snippets: pairs(r.snippets),
+    styles: pairs(r.styles),
   };
 }
