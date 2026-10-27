@@ -823,15 +823,13 @@ mod tests {
     fn flow_s_snippets_and_styles_survive_a_save_and_a_load() {
         let (dir, file) = scratch("flow-styles");
         let mut settings = Settings::default();
-        settings.flow.snippets = vec![("my address".into(), "12 Rue Pasteur,
-75011 Paris".into())];
+        settings.flow.snippets = vec![("my address".into(), "12 Rue Pasteur,\n75011 Paris".into())];
         settings.flow.styles = vec![("slack".into(), "sentences".into()), ("code".into(), "clean".into())];
         save_to(&file, &settings).unwrap();
         let loaded = load_from(&file);
         assert_eq!(loaded.flow, settings.flow);
         let raw: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!(raw["flow"]["snippets"], json!([["my address", "12 Rue Pasteur,
-75011 Paris"]]));
+        assert_eq!(raw["flow"]["snippets"], json!([["my address", "12 Rue Pasteur,\n75011 Paris"]]));
         assert_eq!(raw["flow"]["styles"], json!([["slack", "sentences"], ["code", "clean"]]));
         let _ = std::fs::remove_dir_all(&dir);
     }
