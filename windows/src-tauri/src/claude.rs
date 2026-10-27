@@ -34,7 +34,7 @@ pub const DEFAULT_MODEL: &str = "claude-opus-5";
 
 /// The Messages endpoint: Anthropic's, or the gateway in PEIKA_ANTHROPIC_BASE_URL.
 /// Read once; the gateway's host (never the key) goes to the log once.
-fn endpoint() -> Result<Url, String> {
+pub(crate) fn endpoint() -> Result<Url, String> {
     static ENDPOINT: OnceLock<Result<Url, String>> = OnceLock::new();
     ENDPOINT
         .get_or_init(|| {
@@ -160,7 +160,7 @@ pub async fn send(
     Ok(ChatReply { text })
 }
 
-async fn call(endpoint: &Url, key: &str, body: &Value) -> Result<Value, String> {
+pub(crate) async fn call(endpoint: &Url, key: &str, body: &Value) -> Result<Value, String> {
     let response = net::client(endpoint, Duration::from_secs(90))?
         .post(endpoint.clone())
         .header("x-api-key", key)

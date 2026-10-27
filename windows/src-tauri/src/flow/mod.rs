@@ -27,6 +27,7 @@
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
+mod cleanup;
 mod logic;
 mod paste;
 mod pill;
@@ -434,7 +435,10 @@ fn deliver(app: &AppHandle, session: Session, said: &str) {
         .try_state::<crate::Shared>()
         .map(|shared| shared.settings.lock().unwrap_or_else(|e| e.into_inner()).flow.clone())
         .unwrap_or_default();
-    let words = text::apply(said, &prefs.dictionary, &prefs.replacements);
+    // Optional: a model tidies or translates the words first. Past its time
+    // limit, or on any problem, they stay as heard.
+    let (said, as_heard) = cleanup::step(app, session.id, said);
+    let words = text::apply(&said, &prefs.dictionary, &prefs.replacements);
     // Only that a dictation happened, never what was said.
     if words.is_empty() {
         crate::log::line(format!("flow: dictation {}: nothing heard", session.id));
@@ -444,7 +448,10 @@ fn deliver(app: &AppHandle, session: Session, said: &str) {
     let outcome = paste::paste(&words, session.front, FlowKey::from_setting(&prefs.key));
     crate::log::line(format!("flow: dictation {}: {outcome:?}", session.id));
     match outcome {
-        paste::Outcome::Pasted => pill::hide(app),
+        paste::Outcome::Pasted => match as_heard {
+            Some(why) => pill::message(app, "asheard", why.code()),
+            None => pill::hide(app),
+        },
         paste::Outcome::Copied(paste::Why::Elevated) => pill::message(app, "elevated", ""),
         paste::Outcome::Copied(paste::Why::Away) => pill::message(app, "away", ""),
         paste::Outcome::Copied(paste::Why::Refused) => pill::message(app, "copied", ""),

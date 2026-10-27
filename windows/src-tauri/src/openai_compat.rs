@@ -90,7 +90,7 @@ const MAX_INLINE_TEXT: u64 = 200_000;
 /// Images are sent inline as data URLs; past this size they are skipped.
 const MAX_IMAGE: u64 = 5_000_000;
 
-fn url(p: &Provider, tail: &str) -> Result<Url, String> {
+pub(crate) fn url(p: &Provider, tail: &str) -> Result<Url, String> {
     let base = Url::parse(p.base_url).map_err(|e| e.to_string())?;
     Url::parse(&net::join(&base, tail)).map_err(|e| e.to_string())
 }
@@ -132,7 +132,7 @@ fn request_body(p: &Provider, model: &str, system: &str, history: &[Value], user
 
 /// The answer's text, or the error the provider put in a 200 reply
 /// (OpenRouter does when the upstream model fails).
-fn reply_text(p: &Provider, response: &Value) -> Result<String, String> {
+pub(crate) fn reply_text(p: &Provider, response: &Value) -> Result<String, String> {
     let text = response
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
@@ -148,7 +148,7 @@ fn reply_text(p: &Provider, response: &Value) -> Result<String, String> {
     Err(t("No response text."))
 }
 
-fn status_error(p: &Provider, status: u16, detail: &str) -> String {
+pub(crate) fn status_error(p: &Provider, status: u16, detail: &str) -> String {
     match status {
         401 | 403 => tf(
             "{name} rejected the API key ({status}). Check it in Settings.",

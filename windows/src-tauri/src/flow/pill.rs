@@ -14,8 +14,9 @@
 //
 // What the page shows is one state, kept here so a page that loads late asks
 // for it (`flow_pill_state`): "listening", "locked" (hands-free: ✕ and ✓),
-// "working" (the words are being written down), "message" (with a code the
-// page puts in words), or "hidden".
+// "working" (the words are being written down), "cleaning" (they are with a
+// model, cleanup.rs), "message" (with a code the page puts in words), or
+// "hidden".
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -198,6 +199,14 @@ fn set(app: &AppHandle, next: PillState) {
 /// Shows the pill in `state` ("listening", "locked" or "working").
 pub fn show(app: &AppHandle, state: &'static str, id: u64) {
     set(app, PillState { state, id, message: String::new(), detail: String::new() });
+}
+
+/// The words are with a model to be tidied or translated (cleanup.rs); the
+/// page says which in words. Shown with `translating_only` when nothing else is
+/// asked of it.
+pub fn cleaning(app: &AppHandle, id: u64, translating_only: bool) {
+    let message = if translating_only { "translate" } else { "" };
+    set(app, PillState { state: "cleaning", id, message: message.to_string(), detail: String::new() });
 }
 
 /// Says something for a few seconds, then goes.
