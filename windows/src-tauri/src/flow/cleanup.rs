@@ -34,7 +34,7 @@ use crate::{claude, claude_code, local_chat, net, openai_compat, secrets};
 /// Past this, the words are pasted as heard rather than keeping you waiting.
 const TIMEOUT: Duration = Duration::from_secs(4);
 /// Claude is asked with a small, quick model: the chat's own may be a large one.
-const CLAUDE_MODEL: &str = "claude-haiku-4-5";
+const CLAUDE_MODEL: &str = "claude-haiku-5-5";
 const MAX_TOKENS: u32 = 2048;
 /// Under this many words a clean-up has nothing to do; a translation always does.
 const MIN_WORDS: usize = 3;
