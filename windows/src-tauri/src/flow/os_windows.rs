@@ -17,11 +17,13 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use ::windows::core::PWSTR;
 use ::windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, WPARAM};
 use ::windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use ::windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
@@ -248,6 +250,26 @@ pub fn foreground() -> Option<isize> {
 /// The window in front, unless it is Peika's own: where the words go back to.
 pub fn front_window() -> Option<isize> {
     foreground().filter(|raw| process_of(hwnd(*raw)) != std::process::id())
+}
+
+/// The program a window belongs to, by its executable's name without ".exe"
+/// ("WindowsTerminal"): what picks the style of a dictation. None when the
+/// window is gone or its process refuses to be asked.
+pub fn app_of(raw: isize) -> Option<String> {
+    unsafe {
+        let window = hwnd(raw);
+        if !IsWindow(Some(window)).as_bool() {
+            return None;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_of(window)).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let got = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(process);
+        got.ok()?;
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned())
+    }
 }
 
 /// Brings `raw` to the front if it is still there and was not already.

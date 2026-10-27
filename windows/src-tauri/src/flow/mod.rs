@@ -4,7 +4,8 @@
 // - logic.rs: the key's states (hold, two taps for hands-free, Esc), pure.
 // - os_windows.rs: the low-level keyboard hook, the Ctrl+V, the window in front.
 // - paste.rs: the clipboard, the paste, and what is put back.
-// - text.rs: the user's replacements and dictionary, pure.
+// - text.rs: the user's snippets, replacements and dictionary, pure.
+// - style.rs: how the words are written in the app in front, pure.
 // - pill.rs: the small window that shows it listening.
 // - this file: the controller that joins them to the speech service
 //   (speech/dictate.rs), and the commands the pill calls.
@@ -31,6 +32,7 @@ mod logic;
 mod paste;
 mod pill;
 pub mod store;
+mod style;
 mod text;
 
 #[cfg(windows)]
@@ -55,6 +57,9 @@ mod os {
     pub fn set_key(_key: FlowKey) {}
     pub fn set_active(_active: bool) {}
     pub fn front_window() -> Option<isize> {
+        None
+    }
+    pub fn app_of(_window: isize) -> Option<String> {
         None
     }
 }
@@ -437,7 +442,9 @@ fn deliver(app: &AppHandle, session: Session, said: &str) {
         .try_state::<crate::Shared>()
         .map(|shared| shared.settings.lock().unwrap_or_else(|e| e.into_inner()).flow.clone())
         .unwrap_or_default();
-    let words = text::apply(said, &prefs.dictionary, &prefs.replacements);
+    // The style follows the app that was in front when the key went down.
+    let style = style::style_for(session.front.and_then(os::app_of).as_deref(), &prefs.styles);
+    let words = text::apply(said, &prefs.dictionary, &prefs.replacements, &prefs.snippets, style);
     // Only that a dictation happened, never what was said.
     if words.is_empty() {
         crate::log::line(format!("flow: dictation {}: nothing heard", session.id));

@@ -12,8 +12,8 @@ import {
   recordPress, type Binding,
 } from "../core/shortcuts";
 import {
-  FLOW_KEYS, FLOW_KEY_LABELS, MAX_LENGTH, addReplacement, addWord, barHeights, flowKeyName, lastDays, removeAt,
-  type FlowEntry,
+  FLOW_KEYS, FLOW_KEY_LABELS, FLOW_STYLES, MAX_LENGTH, MAX_SNIPPET, addReplacement, addSnippet, addWord, barHeights,
+  flowKeyName, flowStyleName, lastDays, lineBreaks, removeAt, setStyle, showBreaks, type FlowEntry, type FlowStyle,
 } from "../core/flow";
 import { DEFAULT_SETTINGS, type Settings, type WebSearchChoice } from "../core/state";
 import { SOUND_NAMES } from "../core/sound";
@@ -1587,6 +1587,22 @@ function flowSection(): HTMLElement {
       text: t("Words spelled your way: names, products, terms. When Peika hears one, it uses your capitals and hyphens."),
     }),
     ...dictionaryRows(change),
+    h("div", { class: "subhead", text: t("Snippets") }),
+    h("div", {
+      class: "hint",
+      text: t("Say a short phrase, get a whole text: say “my address” and Peika writes your address, alone or in the middle of a sentence. Write \\n where the text needs a line break. A snippet is pasted as written: replacements, the dictionary and styles never change it."),
+    }),
+    ...snippetRows(change),
+    h("div", { class: "subhead", text: t("Styles") }),
+    h("div", {
+      class: "hint",
+      text: t("How the words are written depends on the app in front when you press the key. As said: only your replacements and dictionary. Clean: without “um” and “uh”, with a capital and a full stop. Sentences: every sentence capitalised and closed."),
+    }),
+    h("div", {
+      class: "hint",
+      text: t("Built in: code editors, terminals and AI chats are As said, mail apps are Sentences, and every other app is Clean. Add a program to choose its style: its name in the Task Manager, such as slack."),
+    }),
+    ...styleRows(change),
   );
 }
 
@@ -1798,6 +1814,89 @@ function dictionaryRows(change: (patch: Partial<Settings["flow"]>) => Promise<vo
   draw();
 
   return [list, h("div", { class: "row" }, word, h("button", { text: t("Add"), onclick: add }))];
+}
+
+function snippetRows(change: (patch: Partial<Settings["flow"]>) => Promise<void>): HTMLElement[] {
+  const list = h("div", { class: "flow-list" });
+  const phrase = h("input", { type: "text", placeholder: t("Phrase to say"), maxlength: String(MAX_LENGTH) }) as HTMLInputElement;
+  const text = h("input", { type: "text", placeholder: t("Text to write"), maxlength: String(MAX_SNIPPET) }) as HTMLInputElement;
+
+  const draw = () => {
+    clear(list);
+    settings.flow.snippets.forEach(([said, written], i) => {
+      list.append(
+        h("div", { class: "flow-item" },
+          h("span", { class: "flow-text", text: said }),
+          h("span", { class: "flow-arrow", text: "→" }),
+          h("span", { class: "flow-text", text: showBreaks(written) }),
+          removeButton(() => {
+            void change({ snippets: removeAt(settings.flow.snippets, i) });
+            draw();
+          }),
+        ),
+      );
+    });
+  };
+  const add = () => {
+    const next = addSnippet(settings.flow.snippets, phrase.value, lineBreaks(text.value));
+    if (!next) return;
+    phrase.value = "";
+    text.value = "";
+    void change({ snippets: next });
+    draw();
+    phrase.focus();
+  };
+  onEnter(phrase, add);
+  onEnter(text, add);
+  draw();
+
+  return [list, h("div", { class: "row" }, phrase, text, h("button", { text: t("Add"), onclick: add }))];
+}
+
+/** A style's name in the interface. */
+function styleLabel(style: FlowStyle): string {
+  switch (style) {
+    case "verbatim": return t("As said");
+    case "sentences": return t("Sentences");
+    default: return t("Clean");
+  }
+}
+
+function styleRows(change: (patch: Partial<Settings["flow"]>) => Promise<void>): HTMLElement[] {
+  const list = h("div", { class: "flow-list" });
+  const program = h("input", { type: "text", placeholder: t("Program name"), maxlength: String(MAX_LENGTH) }) as HTMLInputElement;
+  const pick = h("select", {}) as HTMLSelectElement;
+  for (const name of FLOW_STYLES) pick.append(h("option", { value: name, text: styleLabel(name) }));
+  pick.value = "clean";
+
+  const draw = () => {
+    clear(list);
+    settings.flow.styles.forEach(([app, style], i) => {
+      list.append(
+        h("div", { class: "flow-item" },
+          h("span", { class: "flow-text", text: app }),
+          h("span", { class: "flow-arrow", text: "→" }),
+          h("span", { class: "flow-text", text: styleLabel(flowStyleName(style)) }),
+          removeButton(() => {
+            void change({ styles: removeAt(settings.flow.styles, i) });
+            draw();
+          }),
+        ),
+      );
+    });
+  };
+  const add = () => {
+    const next = setStyle(settings.flow.styles, program.value, pick.value);
+    if (!next) return;
+    program.value = "";
+    void change({ styles: next });
+    draw();
+    program.focus();
+  };
+  onEnter(program, add);
+  draw();
+
+  return [list, h("div", { class: "row" }, program, pick, h("button", { text: t("Add"), onclick: add }))];
 }
 
 function shortcutsSection(initial: ShortcutsReport | null): HTMLElement {
@@ -2156,7 +2255,7 @@ async function render() {
   shortcutsListener = null;
   // Built first: each is cut into pages at its sub-headings (splitAtSubheads).
   const [voiceMain, voiceWeb, voiceDebug] = splitAtSubheads(voiceSection());
-  const [flowMain, flowReplacements, flowDictionary] = splitAtSubheads(flowSection());
+  const [flowMain, flowReplacements, flowDictionary, flowSnippets, flowStyles] = splitAtSubheads(flowSection());
   const [shortcutsGlobal, shortcutsIsland] = splitAtSubheads(shortcutsSection(shortcutReport));
   // One page per leaf of the tree; only the one picked is shown (drawShell).
   const pages: Record<string, HTMLElement> = {
@@ -2175,6 +2274,8 @@ async function render() {
     "flow": page(flowMain),
     "flow-replacements": page(flowReplacements),
     "flow-dictionary": page(flowDictionary),
+    "flow-snippets": page(flowSnippets),
+    "flow-styles": page(flowStyles),
     "flow-history": page(flowHistorySection()),
     "flow-stats": page(flowStatsSection()),
     "shortcuts": page(shortcutsGlobal),
@@ -2202,7 +2303,7 @@ const TREE: [string, [string, string][]][] = [
   [N_("AI models"), [["chat-providers", N_("Chat providers")], ["local-models", N_("Local models")]]],
   [N_("Pills & integrations"), [["pills", N_("Active pills")], ["integrations", N_("Integrations")]]],
   [N_("Voice"), [["voice", N_("Voice")], ["voice-web", N_("Web answers")], ["voice-debug", N_("Debugging")]]],
-  [N_("Flow dictation"), [["flow", N_("Flow dictation")], ["flow-replacements", N_("Replacements")], ["flow-dictionary", N_("Dictionary")], ["flow-history", N_("History")], ["flow-stats", N_("Statistics")]]],
+  [N_("Flow dictation"), [["flow", N_("Flow dictation")], ["flow-replacements", N_("Replacements")], ["flow-dictionary", N_("Dictionary")], ["flow-snippets", N_("Snippets")], ["flow-styles", N_("Styles")], ["flow-history", N_("History")], ["flow-stats", N_("Statistics")]]],
   [N_("Shortcuts"), [["shortcuts", N_("From anywhere")], ["shortcuts-island", N_("In the open island")]]],
   [N_("About"), [["about", N_("About")]]],
 ];

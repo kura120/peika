@@ -265,6 +265,127 @@
    "ru": "О программе",
    "id": "Tentang"
   },
+  "Snippets": {
+   "zh-Hans": "片段",
+   "hi": "स्निपेट",
+   "es": "Fragmentos",
+   "ar": "المقتطفات",
+   "fr": "Extraits",
+   "bn": "স্নিপেট",
+   "pt-BR": "Trechos",
+   "ru": "Заготовки",
+   "id": "Cuplikan"
+  },
+  "Say a short phrase, get a whole text: say “my address” and Peika writes your address, alone or in the middle of a sentence. Write \\n where the text needs a line break. A snippet is pasted as written: replacements, the dictionary and styles never change it.": {
+   "zh-Hans": "说一句短语，得到完整文本：说“我的地址”，Peika 就写出你的地址，单独说或放在句子中间都可以。文本需要换行的地方写 \\n。片段按原样粘贴：替换、词典和风格都不会改动它。",
+   "hi": "एक छोटा वाक्यांश बोलें, पूरा पाठ पाएँ: “मेरा पता” कहें और Peika आपका पता लिख देता है, अकेले या वाक्य के बीच में भी। जहाँ पाठ में नई पंक्ति चाहिए वहाँ \\n लिखें। स्निपेट जैसा लिखा है वैसा ही चिपकाया जाता है: बदलाव, शब्दकोश और शैलियाँ इसे कभी नहीं बदलतीं।",
+   "es": "Di una frase corta y obtén un texto completo: di “mi dirección” y Peika escribe tu dirección, sola o en medio de una frase. Escribe \\n donde el texto necesite un salto de línea. Un fragmento se pega tal cual: los reemplazos, el diccionario y los estilos nunca lo modifican.",
+   "ar": "قل عبارة قصيرة واحصل على نص كامل: قل «عنواني» فيكتب Peika عنوانك، وحدها أو في وسط جملة. اكتب \\n حيث يحتاج النص إلى سطر جديد. يُلصق المقتطف كما كُتب: لا تغيّره الاستبدالات ولا القاموس ولا الأنماط.",
+   "fr": "Dites une courte phrase, obtenez un texte entier : dites « mon adresse » et Peika écrit votre adresse, seule ou au milieu d’une phrase. Écrivez \\n là où le texte doit passer à la ligne. Un extrait est collé tel quel : les remplacements, le dictionnaire et les styles ne le modifient jamais.",
+   "bn": "একটি ছোট বাক্যাংশ বলুন, পুরো লেখা পান: “আমার ঠিকানা” বললে Peika আপনার ঠিকানা লেখে, একা বা বাক্যের মাঝখানে। যেখানে লেখায় নতুন লাইন লাগে সেখানে \\n লিখুন। স্নিপেট যেমন লেখা তেমনই পেস্ট হয়: প্রতিস্থাপন, অভিধান ও শৈলী কখনও এটি বদলায় না।",
+   "pt-BR": "Diga uma frase curta e receba um texto inteiro: diga “meu endereço” e o Peika escreve o seu endereço, sozinho ou no meio de uma frase. Escreva \\n onde o texto precisar de uma quebra de linha. Um trecho é colado como foi escrito: as substituições, o dicionário e os estilos nunca o alteram.",
+   "ru": "Скажите короткую фразу и получите целый текст: скажите «мой адрес», и Peika напишет ваш адрес — отдельно или посреди предложения. Пишите \\n там, где в тексте нужен перенос строки. Заготовка вставляется как написана: замены, словарь и стили её никогда не меняют.",
+   "id": "Ucapkan frasa pendek, dapatkan teks utuh: ucapkan “alamat saya” dan Peika menulis alamat Anda, sendiri atau di tengah kalimat. Tulis \\n di tempat teks perlu pindah baris. Cuplikan ditempel apa adanya: penggantian, kamus, dan gaya tidak pernah mengubahnya."
+  },
+  "Phrase to say": {
+   "zh-Hans": "要说的短语",
+   "hi": "बोलने का वाक्यांश",
+   "es": "Frase que dices",
+   "ar": "العبارة المنطوقة",
+   "fr": "Phrase à dire",
+   "bn": "যে বাক্যাংশ বলবেন",
+   "pt-BR": "Frase a dizer",
+   "ru": "Фраза",
+   "id": "Frasa yang diucapkan"
+  },
+  "Text to write": {
+   "zh-Hans": "要写的文本",
+   "hi": "लिखा जाने वाला पाठ",
+   "es": "Texto que se escribe",
+   "ar": "النص المكتوب",
+   "fr": "Texte à écrire",
+   "bn": "যে লেখা লেখা হবে",
+   "pt-BR": "Texto a escrever",
+   "ru": "Текст",
+   "id": "Teks yang ditulis"
+  },
+  "Styles": {
+   "zh-Hans": "风格",
+   "hi": "शैलियाँ",
+   "es": "Estilos",
+   "ar": "الأنماط",
+   "fr": "Styles",
+   "bn": "শৈলী",
+   "pt-BR": "Estilos",
+   "ru": "Стили",
+   "id": "Gaya"
+  },
+  "How the words are written depends on the app in front when you press the key. As said: only your replacements and dictionary. Clean: without “um” and “uh”, with a capital and a full stop. Sentences: every sentence capitalised and closed.": {
+   "zh-Hans": "文字怎么写取决于你按键时位于前台的应用。原样：只应用你的替换和词典。简洁：去掉“嗯”“呃”，加上首字母大写和句号。整句：每个句子都大写并以标点结束。",
+   "hi": "शब्द कैसे लिखे जाएँ, यह इस पर निर्भर है कि कुंजी दबाते समय कौन-सा ऐप आगे है। जैसा बोला: केवल आपके बदलाव और शब्दकोश। साफ़: “अम” और “उह” के बिना, बड़े अक्षर और पूर्ण विराम के साथ। वाक्य: हर वाक्य बड़े अक्षर से शुरू और विराम से समाप्त।",
+   "es": "Cómo se escriben las palabras depende de la aplicación en primer plano al pulsar la tecla. Tal cual: solo tus reemplazos y tu diccionario. Limpio: sin “eh” ni “um”, con mayúscula inicial y punto final. Frases: cada frase con mayúscula y cerrada.",
+   "ar": "تعتمد طريقة كتابة الكلمات على التطبيق الموجود في الواجهة عند الضغط على المفتاح. كما قيل: استبدالاتك وقاموسك فقط. نظيف: بلا «أمم» و«آه»، مع حرف كبير في البداية ونقطة في النهاية. جمل: كل جملة تبدأ بحرف كبير وتُختم بعلامة.",
+   "fr": "La façon d’écrire les mots dépend de l’application au premier plan quand vous appuyez sur la touche. Tel quel : seulement vos remplacements et votre dictionnaire. Propre : sans « euh » ni « um », avec une majuscule et un point final. Phrases : chaque phrase avec sa majuscule et sa ponctuation.",
+   "bn": "কী চাপার সময় যে অ্যাপ সামনে থাকে তার ওপর নির্ভর করে শব্দগুলো কীভাবে লেখা হবে। যেমন বলা: শুধু আপনার প্রতিস্থাপন ও অভিধান। পরিষ্কার: “উম” ও “আহ” ছাড়া, বড় হাতের অক্ষর ও দাঁড়ি সহ। বাক্য: প্রতিটি বাক্য বড় হাতের অক্ষরে শুরু ও যতিচিহ্নে শেষ।",
+   "pt-BR": "A forma como as palavras são escritas depende do app em primeiro plano quando você pressiona a tecla. Como dito: só as suas substituições e o seu dicionário. Limpo: sem “hum” nem “ah”, com maiúscula e ponto final. Frases: cada frase com maiúscula e fechada.",
+   "ru": "Как записываются слова, зависит от приложения, которое было на переднем плане при нажатии клавиши. Как сказано: только ваши замены и словарь. Чисто: без «эм» и «ну», с заглавной буквой и точкой. Предложения: каждое предложение с заглавной буквы и закрыто знаком.",
+   "id": "Cara kata ditulis bergantung pada aplikasi di depan saat Anda menekan tombol. Apa adanya: hanya penggantian dan kamus Anda. Bersih: tanpa “eh” dan “um”, dengan huruf kapital dan titik. Kalimat: setiap kalimat berkapital dan ditutup tanda baca."
+  },
+  "Built in: code editors, terminals and AI chats are As said, mail apps are Sentences, and every other app is Clean. Add a program to choose its style: its name in the Task Manager, such as slack.": {
+   "zh-Hans": "内置规则：代码编辑器、终端和 AI 聊天为“原样”，邮件应用为“整句”，其他应用为“简洁”。添加程序即可选择它的风格：填写它在任务管理器中的名称，例如 slack。",
+   "hi": "पहले से तय: कोड एडिटर, टर्मिनल और AI चैट “जैसा बोला”, मेल ऐप “वाक्य”, और बाकी हर ऐप “साफ़” हैं। किसी प्रोग्राम की शैली चुनने के लिए उसे जोड़ें: टास्क मैनेजर में उसका नाम, जैसे slack।",
+   "es": "Integrado: los editores de código, las terminales y los chats de IA van “Tal cual”, las aplicaciones de correo “Frases” y todas las demás “Limpio”. Añade un programa para elegir su estilo: su nombre en el Administrador de tareas, como slack.",
+   "ar": "مدمج: محررات الأكواد والطرفيات ومحادثات الذكاء الاصطناعي «كما قيل»، وتطبيقات البريد «جمل»، وكل تطبيق آخر «نظيف». أضف برنامجًا لاختيار نمطه: اسمه في إدارة المهام، مثل slack.",
+   "fr": "Par défaut : les éditeurs de code, les terminaux et les chats d’IA sont « Tel quel », les applications de mail « Phrases », et toute autre application « Propre ». Ajoutez un programme pour choisir son style : son nom dans le Gestionnaire des tâches, comme slack.",
+   "bn": "অন্তর্নির্মিত: কোড এডিটর, টার্মিনাল ও AI চ্যাট “যেমন বলা”, মেইল অ্যাপ “বাক্য”, আর বাকি সব অ্যাপ “পরিষ্কার”। কোনো প্রোগ্রামের শৈলী বাছতে সেটি যোগ করুন: টাস্ক ম্যানেজারে তার নাম, যেমন slack।",
+   "pt-BR": "Já definido: editores de código, terminais e chats de IA ficam em “Como dito”, apps de e-mail em “Frases” e todos os outros em “Limpo”. Adicione um programa para escolher o estilo dele: o nome dele no Gerenciador de Tarefas, como slack.",
+   "ru": "Встроено: редакторы кода, терминалы и ИИ-чаты — «Как сказано», почтовые приложения — «Предложения», все остальные — «Чисто». Добавьте программу, чтобы выбрать её стиль: её имя в диспетчере задач, например slack.",
+   "id": "Bawaan: editor kode, terminal, dan obrolan AI memakai “Apa adanya”, aplikasi surel memakai “Kalimat”, dan semua aplikasi lain memakai “Bersih”. Tambahkan program untuk memilih gayanya: namanya di Pengelola Tugas, misalnya slack."
+  },
+  "Program name": {
+   "zh-Hans": "程序名称",
+   "hi": "प्रोग्राम का नाम",
+   "es": "Nombre del programa",
+   "ar": "اسم البرنامج",
+   "fr": "Nom du programme",
+   "bn": "প্রোগ্রামের নাম",
+   "pt-BR": "Nome do programa",
+   "ru": "Имя программы",
+   "id": "Nama program"
+  },
+  "As said": {
+   "zh-Hans": "原样",
+   "hi": "जैसा बोला",
+   "es": "Tal cual",
+   "ar": "كما قيل",
+   "fr": "Tel quel",
+   "bn": "যেমন বলা",
+   "pt-BR": "Como dito",
+   "ru": "Как сказано",
+   "id": "Apa adanya"
+  },
+  "Clean": {
+   "zh-Hans": "简洁",
+   "hi": "साफ़",
+   "es": "Limpio",
+   "ar": "نظيف",
+   "fr": "Propre",
+   "bn": "পরিষ্কার",
+   "pt-BR": "Limpo",
+   "ru": "Чисто",
+   "id": "Bersih"
+  },
+  "Sentences": {
+   "zh-Hans": "整句",
+   "hi": "वाक्य",
+   "es": "Frases",
+   "ar": "جمل",
+   "fr": "Phrases",
+   "bn": "বাক্য",
+   "pt-BR": "Frases",
+   "ru": "Предложения",
+   "id": "Kalimat"
+  },
   "Maximize": {
    "zh-Hans": "最大化",
    "hi": "बड़ा करें",

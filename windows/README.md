@@ -336,7 +336,7 @@ writes down what you say with the same engine, on this computer).
 | You do | Peika does |
 |---|---|
 | Hold **Right Ctrl** (or **Right Alt**, **Right Shift**: your choice) | Opens the microphone at once, so the first word is not lost, and shows a small pill with Peika and the level of your voice at the bottom of the screen you are on |
-| Let go | Writes down the rest, applies your replacements and dictionary, and pastes into the window that was in front when you pressed the key |
+| Let go | Writes down the rest, applies your snippets, the style of the app in front, your replacements and dictionary, and pastes into the window that was in front when you pressed the key |
 | Tap the key twice, quickly | Hands-free: it keeps listening until you tap again, or click ✓ on the pill (✕ cancels) |
 | `Esc`, or any other key while holding (a shortcut such as `Ctrl+C`) | Cancels: nothing is pasted |
 
@@ -349,6 +349,29 @@ get "Claude Code". Case and hyphens do not matter and only whole words match.
 **Dictionary**: names and terms spelled your way ("Supabase"): when Peika hears
 one it uses your capitals and hyphens. A word with symbols (such as "C++") is
 not matched.
+
+**Snippets** (Settings → Flow dictation → Snippets): a phrase you say becomes a
+whole text. Say "my address" and Peika writes your address, alone or in the
+middle of a sentence; write `\n` in the text where it needs a line break. A
+snippet is set aside before anything else and put back last, so replacements,
+the dictionary and styles never change what is in it. When two phrases overlap
+("my address", "my work address"), the one with more words wins.
+
+**Styles** (Settings → Flow dictation → Styles): how the words are written
+depends on the app in front when you press the key (found from its program, no
+more than that: nothing is read from its window).
+
+| Style | What it does | Built in for |
+|---|---|---|
+| As said | Only your snippets, replacements and dictionary | Code editors, terminals and AI chats: Code, Cursor, Windsurf, Windows Terminal, PowerShell, cmd, Claude, ChatGPT and the like |
+| Clean | Drops fillers ("um", "uh", "euh", "hmm"), a capital to begin, a full stop to end | Every other app |
+| Sentences | Clean, and every sentence capitalised and closed | Mail: Outlook, Thunderbird |
+
+These are rules on your computer, not a model: they do not rewrite what you
+said. To give an app another style, add its program in Settings (its name in the
+Task Manager, such as `slack`, with or without `.exe`); your choice wins over the
+built-in one. If Windows does not tell which app was in front, the style is
+Clean.
 
 **Paste.** The words go on the clipboard as text (kept out of the clipboard
 history and the cloud clipboard), Peika sends Ctrl+V to the window, and about
@@ -385,7 +408,8 @@ computer.
   switching Flow off removes it and the pill's window.
 - The microphone is open only while you hold the key (or are hands-free), and
   "OK Peika" stands aside meanwhile.
-- Not yet: styles per app, snippets, and clean-up or translation by a model. Flow pastes what was heard, with your replacements.
+- Not yet: clean-up or translation by a model. Flow pastes what was heard,
+  with your snippets, style, replacements and dictionary.
 
 ## Your pills
 

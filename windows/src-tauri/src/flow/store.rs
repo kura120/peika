@@ -258,44 +258,12 @@ fn keeps_history(app: &AppHandle) -> bool {
         .unwrap_or(true)
 }
 
-/// The program that owns a window: "slack", "WindowsTerminal". Windows only.
-#[cfg(windows)]
-fn app_of(raw: isize) -> Option<String> {
-    use ::windows::core::PWSTR;
-    use ::windows::Win32::Foundation::{CloseHandle, HWND};
-    use ::windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    use ::windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-
-    unsafe {
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(HWND(raw as *mut _), Some(&mut pid as *mut u32));
-        if pid == 0 {
-            return None;
-        }
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut buf = [0u16; 1024];
-        let mut len = buf.len() as u32;
-        let got = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
-        let _ = CloseHandle(process);
-        got.ok()?;
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned())
-    }
-}
-
-#[cfg(not(windows))]
-fn app_of(_raw: isize) -> Option<String> {
-    None
-}
-
 /// A dictation was pasted (or left on the clipboard): counted, and its text
 /// kept unless the user turned the history off. `front` is the window it was
 /// meant for; `seconds` how long it took.
 pub fn record(app: &AppHandle, text: &str, front: Option<isize>, seconds: f64) {
     let keep = keeps_history(app);
-    let program = front.and_then(app_of);
+    let program = front.and_then(super::os::app_of);
     with_store(|s| s.record(text, program.as_deref(), seconds, keep, today(), now_ms()));
 }
 
