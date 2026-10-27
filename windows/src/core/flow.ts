@@ -19,9 +19,11 @@ export interface FlowPref {
   /** What is said, what is written instead. */
   replacements: [string, string][];
   dictionary: string[];
+  /** Keep the text of each dictation to read again. Off: only the numbers of each day (flow/store.rs). */
+  keepHistory: boolean;
 }
 
-export const DEFAULT_FLOW: FlowPref = { enabled: false, key: "RightCtrl", replacements: [], dictionary: [] };
+export const DEFAULT_FLOW: FlowPref = { enabled: false, key: "RightCtrl", replacements: [], dictionary: [], keepHistory: true };
 
 /** Entries a list may hold: a dictionary is not a database. */
 export const MAX_ENTRIES = 200;
@@ -84,5 +86,50 @@ export function normalizeFlow(raw: unknown): FlowPref {
       ? r.replacements.filter((p): p is [string, string] => Array.isArray(p) && text(p[0]) && text(p[1])).map(([a, b]) => [a, b])
       : [],
     dictionary: Array.isArray(r.dictionary) ? r.dictionary.filter(text) : [],
+    keepHistory: r.keepHistory !== false,
   };
+}
+
+// ── History and statistics (src-tauri/src/flow/store.rs) ──────────────────────
+
+/** One kept dictation. */
+export interface FlowEntry {
+  /** Milliseconds since 1970. */
+  at: number;
+  /** The program it was pasted in ("slack"), when known. */
+  app: string | null;
+  words: number;
+  seconds: number;
+  text: string;
+}
+
+export interface FlowDay {
+  /** "2026-10-14". */
+  date: string;
+  dictations: number;
+  words: number;
+  seconds: number;
+}
+
+export interface FlowStats {
+  today: FlowDay;
+  /** The last 30 days, oldest first, today last. */
+  days: FlowDay[];
+  streak: number;
+  wordsPerMinute: number;
+}
+
+/** The last `count` days of the list (it is oldest first). */
+export function lastDays(days: FlowDay[], count: number): FlowDay[] {
+  return days.slice(Math.max(0, days.length - count));
+}
+
+/**
+ * How tall each day's bar is, in percent of the chart: the busiest day is
+ * 100, a day with words is never thinner than 4 so it can be seen, an empty
+ * day is 0.
+ */
+export function barHeights(days: FlowDay[]): number[] {
+  const most = Math.max(0, ...days.map((d) => d.words));
+  return days.map((d) => (d.words > 0 && most > 0 ? Math.max(4, Math.round((d.words / most) * 100)) : 0));
 }

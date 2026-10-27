@@ -9,8 +9,8 @@ import { readFileSync } from "node:fs";
 import { installFakeDom } from "./fakedom.mjs";
 import { calls, sent } from "./tauri.mjs";
 import {
-  DEFAULT_FLOW, FLOW_KEYS, FLOW_KEY_LABELS, MAX_ENTRIES, MAX_LENGTH, addReplacement, addWord, flowKeyName,
-  normalizeFlow, removeAt,
+  DEFAULT_FLOW, FLOW_KEYS, FLOW_KEY_LABELS, MAX_ENTRIES, MAX_LENGTH, addReplacement, addWord, barHeights, flowKeyName,
+  lastDays, normalizeFlow, removeAt,
 } from "../src/core/flow.ts";
 import { DEFAULT_SETTINGS } from "../src/core/state.ts";
 import { Bridge } from "../src/core/bridge.ts";
@@ -29,7 +29,7 @@ beforeEach(() => {
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 test("Flow is off by default, on right Ctrl, with nothing in its lists", () => {
-  assert.deepEqual(DEFAULT_SETTINGS.flow, { enabled: false, key: "RightCtrl", replacements: [], dictionary: [] });
+  assert.deepEqual(DEFAULT_SETTINGS.flow, { enabled: false, key: "RightCtrl", replacements: [], dictionary: [], keepHistory: true });
   assert.equal(DEFAULT_FLOW.enabled, false);
 });
 
@@ -54,6 +54,52 @@ test("Flow's settings are read from whatever was saved, with defaults for the re
     normalizeFlow({ replacements: [["a", "b"], ["c"], [1, 2], "d"], dictionary: ["Supabase", 4, null] }),
     { ...DEFAULT_FLOW, replacements: [["a", "b"]], dictionary: ["Supabase"] },
   );
+});
+
+test("the history is kept unless it was switched off", () => {
+  assert.equal(DEFAULT_FLOW.keepHistory, true);
+  assert.equal(normalizeFlow({ keepHistory: false }).keepHistory, false);
+  assert.equal(normalizeFlow({ keepHistory: 0 }).keepHistory, true);
+  assert.equal(normalizeFlow({ keepHistory: "no" }).keepHistory, true);
+});
+
+// ── History and statistics ────────────────────────────────────────────────────
+
+const day = (date, words) => ({ date, dictations: words > 0 ? 1 : 0, words, seconds: words });
+
+test("the chart shows the last days, oldest first, with the busiest day full height", () => {
+  const days = Array.from({ length: 30 }, (_, i) => day(`2026-09-${String(i + 1).padStart(2, "0")}`, i === 29 ? 200 : i === 28 ? 50 : 0));
+  const last = lastDays(days, 14);
+  assert.equal(last.length, 14);
+  assert.equal(last[0].date, "2026-09-17");
+  assert.equal(last[13].words, 200);
+  const heights = barHeights(last);
+  assert.deepEqual([heights[13], heights[12], heights[0]], [100, 25, 0]);
+  assert.equal(lastDays(days.slice(0, 3), 14).length, 3);
+});
+
+test("a day with a few words still shows a bar, and an empty chart has none", () => {
+  assert.deepEqual(barHeights([day("a", 1), day("b", 1000), day("c", 0)]), [4, 100, 0]);
+  assert.deepEqual(barHeights([day("a", 0), day("b", 0)]), [0, 0]);
+  assert.deepEqual(barHeights([]), []);
+});
+
+test("the history and the numbers are Bridge commands", async () => {
+  await Bridge.flowHistory();
+  await Bridge.flowStats();
+  await Bridge.flowHistoryClear();
+  assert.deepEqual(calls.map(([name]) => name), ["flow_history", "flow_stats", "flow_history_clear"]);
+});
+
+test("the Flow group of the settings tree has the History and Statistics pages, and their commands are registered", () => {
+  const main = read("src/settings/main.ts");
+  assert.match(main, /\["flow-history", N_\("History"\)\], \["flow-stats", N_\("Statistics"\)\]/);
+  assert.match(main, /"flow-history": page\(/);
+  assert.match(main, /"flow-stats": page\(/);
+  const lib = read("src-tauri/src/lib.rs");
+  for (const command of ["flow_history", "flow_stats", "flow_history_clear"]) {
+    assert.ok(lib.includes(`flow::store::${command}`), command);
+  }
 });
 
 // ── The lists ─────────────────────────────────────────────────────────────────
