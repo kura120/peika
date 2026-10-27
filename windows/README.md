@@ -359,6 +359,22 @@ is not elevated type into one that is (UIPI): Peika checks first, leaves the
 words on the clipboard and says so in the pill, so you can paste them yourself.
 The same if the window you were in cannot be brought back.
 
+**Clean-up and translation** (Settings → Flow dictation, both off). **Clean up
+with a model** removes hesitations and spoken corrections ("at 3, no, at 4"
+becomes "at 4") and fixes punctuation; **Translate into** pastes whatever you
+said in the language you type or pick. When either is on, the words as the
+speech engine wrote them (text only, never the audio) are sent to one provider:
+the one you pick under **Ask this provider**, or the chat's. Anthropic, OpenAI,
+Google, OpenRouter and NVIDIA use the key you already gave the chat; Ollama,
+LM Studio and a custom server use the address (and the chat model) set in
+Settings → Local models. Claude Code is not offered, as it has no key to ask
+with. Nothing else is sent, and nothing at all while both are off. Peika waits
+four seconds at most: past that, on any error (no key, no network, no model
+chosen) or if the answer does not look like your words rewritten (empty, or
+much longer or shorter), the words are pasted as heard and the pill says so.
+Clean-up leaves very short dictations (under three words) alone and does not
+ask anyone. The step comes first, then your replacements and dictionary.
+
 **Privacy.**
 - Nothing is recorded. The sound stays in memory only until it is written down;
   the log says that a dictation happened, never what was said.
@@ -370,8 +386,8 @@ The same if the window you were in cannot be brought back.
   switching Flow off removes it and the pill's window.
 - The microphone is open only while you hold the key (or are hands-free), and
   "OK Peika" stands aside meanwhile.
-- Not yet: styles per app, snippets, history and statistics, and clean-up or
-  translation by a model. Flow pastes what was heard, with your replacements.
+- Not yet: styles per app, snippets, and history and statistics. Flow pastes
+  what was heard, with your replacements.
 
 ## Your pills
 
