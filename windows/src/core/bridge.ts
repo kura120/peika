@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { SavedEdit } from "./diff";
-import type { FlowPillState } from "./flow";
+import type { FlowEntry, FlowPillState, FlowStats } from "./flow";
 import type { Settings } from "./state";
 import type { RecapHistory, RecapPrefs } from "../recap/summary";
 import type { SpotifyState } from "./spotify";
@@ -370,6 +370,12 @@ export const Bridge = {
   flowPillState: () => call<FlowPillState>("flow_pill_state"),
   flowPillFinish: () => call<void>("flow_pill_finish"),
   flowPillCancel: () => call<void>("flow_pill_cancel"),
+  /** The kept dictations, newest first (src-tauri/src/flow/store.rs); empty when the history is off. */
+  flowHistory: () => call<FlowEntry[]>("flow_history"),
+  /** Today's numbers, the last 30 days, the streak and the words per minute. */
+  flowStats: () => call<FlowStats>("flow_stats"),
+  /** Empties the history; the daily numbers stay. */
+  flowHistoryClear: () => call<void>("flow_history_clear"),
   /** Opens the mail app on a draft, for the user to read and send. False when the recipient is not one address. */
   openMailDraft: (to: string, subject: string, body: string) => call<boolean>("open_mail_draft", { to, subject, body }),
   /** The user is done talking: nothing more is listened for until the wake phrase. */

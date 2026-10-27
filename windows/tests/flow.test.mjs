@@ -9,8 +9,9 @@ import { readFileSync } from "node:fs";
 import { installFakeDom } from "./fakedom.mjs";
 import { calls, sent } from "./tauri.mjs";
 import {
-  DEFAULT_FLOW, FLOW_KEYS, FLOW_KEY_LABELS, MAX_ENTRIES, MAX_LENGTH, addReplacement, addWord, flowKeyName,
-  FLOW_LANGUAGES, MAX_LANGUAGE, cleanupProviders, cleanupTarget, normalizeFlow, removeAt, sendsText,
+  DEFAULT_FLOW, FLOW_KEYS, FLOW_KEY_LABELS, FLOW_LANGUAGES, FLOW_STYLES, MAX_ENTRIES, MAX_LANGUAGE, MAX_LENGTH, MAX_SNIPPET,
+  addReplacement, addSnippet, addWord, appKey, barHeights, cleanupProviders, cleanupTarget, flowKeyName, flowStyleName,
+  lastDays, lineBreaks, normalizeFlow, removeAt, sendsText, setStyle, showBreaks,
 } from "../src/core/flow.ts";
 import { DEFAULT_SETTINGS } from "../src/core/state.ts";
 import { Bridge } from "../src/core/bridge.ts";
@@ -30,7 +31,8 @@ beforeEach(() => {
 
 test("Flow is off by default, on right Ctrl, with nothing in its lists", () => {
   assert.deepEqual(DEFAULT_SETTINGS.flow, {
-    enabled: false, key: "RightCtrl", replacements: [], dictionary: [], cleanup: false, translateTo: "", cleanupProvider: "",
+    enabled: false, key: "RightCtrl", replacements: [], dictionary: [], snippets: [], styles: [], keepHistory: true,
+    cleanup: false, translateTo: "", cleanupProvider: "",
   });
   assert.equal(DEFAULT_FLOW.enabled, false);
 });
@@ -84,11 +86,66 @@ test("Flow's settings are read from whatever was saved, with defaults for the re
   assert.deepEqual(normalizeFlow(undefined), DEFAULT_FLOW);
   assert.deepEqual(normalizeFlow("on"), DEFAULT_FLOW);
   assert.deepEqual(normalizeFlow({ enabled: true }), { ...DEFAULT_FLOW, enabled: true });
-  assert.deepEqual(normalizeFlow({ enabled: 1, key: 5, replacements: "x", dictionary: {} }), DEFAULT_FLOW);
+  assert.deepEqual(normalizeFlow({ enabled: 1, key: 5, replacements: "x", dictionary: {}, snippets: 3, styles: null }), DEFAULT_FLOW);
   assert.deepEqual(
     normalizeFlow({ replacements: [["a", "b"], ["c"], [1, 2], "d"], dictionary: ["Supabase", 4, null] }),
     { ...DEFAULT_FLOW, replacements: [["a", "b"]], dictionary: ["Supabase"] },
   );
+});
+
+test("snippets and styles are read as pairs, and what is not a pair is dropped", () => {
+  assert.deepEqual(
+    normalizeFlow({ snippets: [["my address", "12 Rue"], ["x"], [1, 2], "y"], styles: [["slack", "sentences"], ["cmd"], 7] }),
+    { ...DEFAULT_FLOW, snippets: [["my address", "12 Rue"]], styles: [["slack", "sentences"]] },
+  );
+  // A style this build does not know is kept as it came: Rust reads it as clean.
+  assert.deepEqual(normalizeFlow({ styles: [["slack", "poetic"]] }).styles, [["slack", "poetic"]]);
+});
+
+test("the history is kept unless it was switched off", () => {
+  assert.equal(DEFAULT_FLOW.keepHistory, true);
+  assert.equal(normalizeFlow({ keepHistory: false }).keepHistory, false);
+  assert.equal(normalizeFlow({ keepHistory: 0 }).keepHistory, true);
+  assert.equal(normalizeFlow({ keepHistory: "no" }).keepHistory, true);
+});
+
+// ── History and statistics ────────────────────────────────────────────────────
+
+const day = (date, words) => ({ date, dictations: words > 0 ? 1 : 0, words, seconds: words });
+
+test("the chart shows the last days, oldest first, with the busiest day full height", () => {
+  const days = Array.from({ length: 30 }, (_, i) => day(`2026-09-${String(i + 1).padStart(2, "0")}`, i === 29 ? 200 : i === 28 ? 50 : 0));
+  const last = lastDays(days, 14);
+  assert.equal(last.length, 14);
+  assert.equal(last[0].date, "2026-09-17");
+  assert.equal(last[13].words, 200);
+  const heights = barHeights(last);
+  assert.deepEqual([heights[13], heights[12], heights[0]], [100, 25, 0]);
+  assert.equal(lastDays(days.slice(0, 3), 14).length, 3);
+});
+
+test("a day with a few words still shows a bar, and an empty chart has none", () => {
+  assert.deepEqual(barHeights([day("a", 1), day("b", 1000), day("c", 0)]), [4, 100, 0]);
+  assert.deepEqual(barHeights([day("a", 0), day("b", 0)]), [0, 0]);
+  assert.deepEqual(barHeights([]), []);
+});
+
+test("the history and the numbers are Bridge commands", async () => {
+  await Bridge.flowHistory();
+  await Bridge.flowStats();
+  await Bridge.flowHistoryClear();
+  assert.deepEqual(calls.map(([name]) => name), ["flow_history", "flow_stats", "flow_history_clear"]);
+});
+
+test("the Flow group of the settings tree has the History and Statistics pages, and their commands are registered", () => {
+  const main = read("src/settings/main.ts");
+  assert.match(main, /\["flow-history", N_\("History"\)\], \["flow-stats", N_\("Statistics"\)\]/);
+  assert.match(main, /"flow-history": page\(/);
+  assert.match(main, /"flow-stats": page\(/);
+  const lib = read("src-tauri/src/lib.rs");
+  for (const command of ["flow_history", "flow_stats", "flow_history_clear"]) {
+    assert.ok(lib.includes(`flow::store::${command}`), command);
+  }
 });
 
 // ── The lists ─────────────────────────────────────────────────────────────────
@@ -123,6 +180,65 @@ test("a list holds only so many entries", () => {
   assert.equal(addReplacement(pairs, "one", "more"), null);
   // Changing one that is there is still allowed.
   assert.equal(addReplacement(pairs, "WORD3", "changed").length, MAX_ENTRIES);
+});
+
+test("a snippet needs a phrase and a text, trimmed, and keeps its line breaks", () => {
+  assert.deepEqual(addSnippet([], " my address ", "\n12 Rue Pasteur,\n75011 Paris \n"), [["my address", "12 Rue Pasteur,\n75011 Paris"]]);
+  assert.equal(addSnippet([], "", "text"), null);
+  assert.equal(addSnippet([], "phrase", "  \n "), null);
+  assert.equal(addSnippet([], "p".repeat(MAX_LENGTH + 1), "text"), null);
+  assert.equal(addSnippet([], "phrase", "t".repeat(MAX_SNIPPET + 1)), null);
+  assert.equal(addSnippet([], "phrase", "t".repeat(MAX_SNIPPET)).length, 1, "a long text is still allowed up to the limit");
+});
+
+test("the same phrase twice replaces the first snippet, and a list holds only so many", () => {
+  const list = [["my address", "old"], ["my iban", "FR76"]];
+  assert.deepEqual(addSnippet(list, "My Address", "new"), [["My Address", "new"], ["my iban", "FR76"]]);
+  assert.deepEqual(list[0], ["my address", "old"], "the list given is not changed");
+  const full = Array.from({ length: MAX_ENTRIES }, (_, i) => [`phrase ${i}`, "text"]);
+  assert.equal(addSnippet(full, "one more", "text"), null);
+  assert.equal(addSnippet(full, "PHRASE 3", "changed").length, MAX_ENTRIES);
+});
+
+test("a line break is typed as backslash n in the one-line field, and shown as an arrow in the list", () => {
+  assert.equal(lineBreaks("12 Rue Pasteur,\\n75011 Paris"), "12 Rue Pasteur,\n75011 Paris");
+  assert.equal(lineBreaks("no break, C:\\temp"), "no break, C:\\temp");
+  assert.equal(showBreaks("12 Rue Pasteur,\n75011 Paris"), "12 Rue Pasteur, \u21b5 75011 Paris");
+  assert.equal(showBreaks("one line"), "one line");
+});
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
+test("there are three styles, and one this build does not know reads as clean, as Rust does", () => {
+  assert.deepEqual([...FLOW_STYLES], ["verbatim", "clean", "sentences"]);
+  assert.equal(flowStyleName("sentences"), "sentences");
+  assert.equal(flowStyleName("poetic"), "clean");
+  assert.equal(flowStyleName(undefined), "clean");
+});
+
+test("a program is its executable in lower case without .exe, as Rust keys it", () => {
+  assert.equal(appKey("Slack.exe"), "slack");
+  assert.equal(appKey("  WindowsTerminal "), "windowsterminal");
+  assert.equal(appKey("Code - Insiders"), "code - insiders");
+  assert.equal(appKey(".exe"), "");
+});
+
+test("a program's style is set once: the second choice replaces the first", () => {
+  const first = setStyle([], "Slack.exe", "sentences");
+  assert.deepEqual(first, [["slack", "sentences"]]);
+  assert.deepEqual(setStyle(first, "SLACK", "verbatim"), [["slack", "verbatim"]]);
+  assert.deepEqual(setStyle(first, "code", "clean"), [["slack", "sentences"], ["code", "clean"]]);
+  assert.deepEqual(first, [["slack", "sentences"]], "the list given is not changed");
+});
+
+test("a style needs a program with a name and one of the three styles", () => {
+  assert.equal(setStyle([], "  ", "clean"), null);
+  assert.equal(setStyle([], ".exe", "clean"), null);
+  assert.equal(setStyle([], "slack", "poetic"), null);
+  assert.equal(setStyle([], "a".repeat(MAX_LENGTH + 1), "clean"), null);
+  const full = Array.from({ length: MAX_ENTRIES }, (_, i) => [`app${i}`, "clean"]);
+  assert.equal(setStyle(full, "one more", "clean"), null);
+  assert.equal(setStyle(full, "app3", "verbatim").length, MAX_ENTRIES);
 });
 
 test("removing an entry leaves the others in order", () => {

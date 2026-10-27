@@ -12,8 +12,9 @@ import {
   recordPress, type Binding,
 } from "../core/shortcuts";
 import {
-  FLOW_KEYS, FLOW_KEY_LABELS, FLOW_LANGUAGES, MAX_LANGUAGE, MAX_LENGTH, addReplacement, addWord, cleanupProviders,
-  cleanupTarget, flowKeyName, removeAt, sendsText,
+  FLOW_KEYS, FLOW_KEY_LABELS, FLOW_LANGUAGES, FLOW_STYLES, MAX_LANGUAGE, MAX_LENGTH, MAX_SNIPPET, addReplacement,
+  addSnippet, addWord, barHeights, cleanupProviders, cleanupTarget, flowKeyName, flowStyleName, lastDays, lineBreaks,
+  removeAt, sendsText, setStyle, showBreaks, type FlowEntry, type FlowStyle,
 } from "../core/flow";
 import { DEFAULT_SETTINGS, type Settings, type WebSearchChoice } from "../core/state";
 import { SOUND_NAMES } from "../core/sound";
@@ -30,7 +31,7 @@ import { mountBand } from "./band";
 import { renderDiff, statusDot } from "./parts";
 import { SEARCH_ENGINES } from "./search";
 import {
-  LANGUAGES, N_, isRtl, onLanguageChange, resolveLanguage, setLanguage, systemLanguages, t, tn,
+  LANGUAGES, N_, dayMonth, isRtl, onLanguageChange, resolveLanguage, setLanguage, systemLanguages, t, tn,
 } from "../i18n/i18n";
 
 /** Where secrets.rs keeps the keys on this OS. */
@@ -1591,6 +1592,148 @@ function flowSection(): HTMLElement {
       text: t("Words spelled your way: names, products, terms. When Peika hears one, it uses your capitals and hyphens."),
     }),
     ...dictionaryRows(change),
+    h("div", { class: "subhead", text: t("Snippets") }),
+    h("div", {
+      class: "hint",
+      text: t("Say a short phrase, get a whole text: say “my address” and Peika writes your address, alone or in the middle of a sentence. Write \\n where the text needs a line break. A snippet is pasted as written: replacements, the dictionary and styles never change it."),
+    }),
+    ...snippetRows(change),
+    h("div", { class: "subhead", text: t("Styles") }),
+    h("div", {
+      class: "hint",
+      text: t("How the words are written depends on the app in front when you press the key. As said: only your replacements and dictionary. Clean: without “um” and “uh”, with a capital and a full stop. Sentences: every sentence capitalised and closed."),
+    }),
+    h("div", {
+      class: "hint",
+      text: t("Built in: code editors, terminals and AI chats are As said, mail apps are Sentences, and every other app is Clean. Add a program to choose its style: its name in the Task Manager, such as slack."),
+    }),
+    ...styleRows(change),
+  );
+}
+
+// ── Flow history and statistics ───────────────────────────────────────────────
+
+/** Redraws a Flow page from the store when it is picked (drawShell): dictations happen while the window is open. */
+const flowRefreshers: Record<string, () => void> = {};
+
+/** "14:32" for today, "Oct 9, 14:32" for another day. */
+function entryTime(at: number): string {
+  const d = new Date(at);
+  const clock = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? clock : `${dayMonth(d.getMonth(), d.getDate())}, ${clock}`;
+}
+
+function flowHistorySection(): HTMLElement {
+  const keep = toggle(settings.flow.keepHistory, (v) => {
+    settings.flow = { ...settings.flow, keepHistory: v };
+    void save().then(() => draw());
+  });
+  const list = h("div", { class: "flow-list" });
+  const empty = h("button", { class: "danger", text: t("Empty the history") }) as HTMLButtonElement;
+  const note = h("div", { class: "hint" });
+
+  const draw = async () => {
+    const entries: FlowEntry[] = settings.flow.keepHistory ? ((await Bridge.flowHistory()) ?? []) : [];
+    clear(list);
+    empty.disabled = entries.length === 0;
+    note.textContent = settings.flow.keepHistory
+      ? entries.length === 0 ? t("Nothing dictated yet.") : ""
+      : t("The history is off. Only the numbers of each day are kept.");
+    note.hidden = note.textContent === "";
+    for (const entry of entries) list.append(historyItem(entry));
+  };
+  empty.addEventListener("click", () => {
+    void Bridge.flowHistoryClear().then(() => draw());
+  });
+  flowRefreshers["flow-history"] = () => void draw();
+  void draw();
+
+  return h(
+    "section",
+    {},
+    h("h2", {}, h("span", { text: t("History") })),
+    h("div", {
+      class: "hint",
+      text: t("The words of each dictation are kept on this computer only, the last 500, as text and never as sound. Turn this off to keep only the numbers of each day."),
+    }),
+    h("div", { class: "row" }, h("label", { text: t("Keep a history of what you dictate") }), keep, h("span", { class: "spacer" }), empty),
+    note,
+    list,
+  );
+}
+
+function historyItem(entry: FlowEntry): HTMLElement {
+  const copy = h("button", { class: "flow-copy", text: t("Copy") }) as HTMLButtonElement;
+  copy.addEventListener("click", () => {
+    void navigator.clipboard?.writeText(entry.text).then(
+      () => {
+        copy.textContent = t("Copied");
+        setTimeout(() => (copy.textContent = t("Copy")), 1500);
+      },
+      () => {},
+    );
+  });
+  return h("div", { class: "flow-entry" },
+    h("div", { class: "flow-entry-head" },
+      h("span", { class: "flow-when", text: entryTime(entry.at) }),
+      entry.app ? h("span", { class: "flow-app", text: entry.app }) : null,
+      h("span", { class: "spacer" }),
+      copy,
+    ),
+    h("div", { class: "flow-entry-text", text: entry.text }),
+  );
+}
+
+const CHART_DAYS = 14;
+
+function flowStatsSection(): HTMLElement {
+  const tiles = h("div", { class: "flow-tiles" });
+  const chart = h("div", { class: "flow-chart", role: "img", "aria-label": t("Words per day, last 14 days") });
+  const tile = (value: string, label: string) =>
+    h("div", { class: "flow-tile" }, h("div", { class: "flow-tile-value", text: value }), h("div", { class: "flow-tile-label", text: label }));
+
+  const draw = async () => {
+    const stats = await Bridge.flowStats();
+    clear(tiles);
+    clear(chart);
+    if (!stats) return;
+    tiles.append(
+      tile(String(stats.today.dictations), t("Dictations today")),
+      tile(String(stats.today.words), t("Words today")),
+      tile(String(stats.wordsPerMinute), t("Words per minute")),
+      tile(String(stats.streak), t("Days in a row")),
+    );
+    const days = lastDays(stats.days, CHART_DAYS);
+    const heights = barHeights(days);
+    days.forEach((day, i) => {
+      const [, month, date] = day.date.split("-").map(Number);
+      const label = dayMonth(month - 1, date);
+      chart.append(
+        h("div", { class: "flow-col", title: t("{date}: {words} words", { date: label, words: day.words }) },
+          h("div", { class: "flow-bar-wrap" },
+            h("div", { class: day.words > 0 ? "flow-bar" : "flow-bar none", style: `height:${heights[i]}%` }),
+          ),
+          h("div", { class: "flow-day", text: i === days.length - 1 || i % 2 === 0 ? String(date) : "" }),
+        ),
+      );
+    });
+  };
+  flowRefreshers["flow-stats"] = () => void draw();
+  void draw();
+
+  return h(
+    "section",
+    {},
+    h("h2", {}, h("span", { text: t("Statistics") })),
+    h("div", {
+      class: "hint",
+      text: t("The numbers of each day are kept on this computer, even after you empty the history."),
+    }),
+    tiles,
+    h("div", { class: "subhead", text: t("Last 14 days") }),
+    chart,
   );
 }
 
@@ -1734,6 +1877,89 @@ function dictionaryRows(change: (patch: Partial<Settings["flow"]>) => Promise<vo
   draw();
 
   return [list, h("div", { class: "row" }, word, h("button", { text: t("Add"), onclick: add }))];
+}
+
+function snippetRows(change: (patch: Partial<Settings["flow"]>) => Promise<void>): HTMLElement[] {
+  const list = h("div", { class: "flow-list" });
+  const phrase = h("input", { type: "text", placeholder: t("Phrase to say"), maxlength: String(MAX_LENGTH) }) as HTMLInputElement;
+  const text = h("input", { type: "text", placeholder: t("Text to write"), maxlength: String(MAX_SNIPPET) }) as HTMLInputElement;
+
+  const draw = () => {
+    clear(list);
+    settings.flow.snippets.forEach(([said, written], i) => {
+      list.append(
+        h("div", { class: "flow-item" },
+          h("span", { class: "flow-text", text: said }),
+          h("span", { class: "flow-arrow", text: "→" }),
+          h("span", { class: "flow-text", text: showBreaks(written) }),
+          removeButton(() => {
+            void change({ snippets: removeAt(settings.flow.snippets, i) });
+            draw();
+          }),
+        ),
+      );
+    });
+  };
+  const add = () => {
+    const next = addSnippet(settings.flow.snippets, phrase.value, lineBreaks(text.value));
+    if (!next) return;
+    phrase.value = "";
+    text.value = "";
+    void change({ snippets: next });
+    draw();
+    phrase.focus();
+  };
+  onEnter(phrase, add);
+  onEnter(text, add);
+  draw();
+
+  return [list, h("div", { class: "row" }, phrase, text, h("button", { text: t("Add"), onclick: add }))];
+}
+
+/** A style's name in the interface. */
+function styleLabel(style: FlowStyle): string {
+  switch (style) {
+    case "verbatim": return t("As said");
+    case "sentences": return t("Sentences");
+    default: return t("Clean");
+  }
+}
+
+function styleRows(change: (patch: Partial<Settings["flow"]>) => Promise<void>): HTMLElement[] {
+  const list = h("div", { class: "flow-list" });
+  const program = h("input", { type: "text", placeholder: t("Program name"), maxlength: String(MAX_LENGTH) }) as HTMLInputElement;
+  const pick = h("select", {}) as HTMLSelectElement;
+  for (const name of FLOW_STYLES) pick.append(h("option", { value: name, text: styleLabel(name) }));
+  pick.value = "clean";
+
+  const draw = () => {
+    clear(list);
+    settings.flow.styles.forEach(([app, style], i) => {
+      list.append(
+        h("div", { class: "flow-item" },
+          h("span", { class: "flow-text", text: app }),
+          h("span", { class: "flow-arrow", text: "→" }),
+          h("span", { class: "flow-text", text: styleLabel(flowStyleName(style)) }),
+          removeButton(() => {
+            void change({ styles: removeAt(settings.flow.styles, i) });
+            draw();
+          }),
+        ),
+      );
+    });
+  };
+  const add = () => {
+    const next = setStyle(settings.flow.styles, program.value, pick.value);
+    if (!next) return;
+    program.value = "";
+    void change({ styles: next });
+    draw();
+    program.focus();
+  };
+  onEnter(program, add);
+  draw();
+
+  return [list, h("div", { class: "row" }, program, pick, h("button", { text: t("Add"), onclick: add }))];
 }
 
 function shortcutsSection(initial: ShortcutsReport | null): HTMLElement {
@@ -2092,7 +2318,7 @@ async function render() {
   shortcutsListener = null;
   // Built first: each is cut into pages at its sub-headings (splitAtSubheads).
   const [voiceMain, voiceWeb, voiceDebug] = splitAtSubheads(voiceSection());
-  const [flowMain, flowReplacements, flowDictionary] = splitAtSubheads(flowSection());
+  const [flowMain, flowReplacements, flowDictionary, flowSnippets, flowStyles] = splitAtSubheads(flowSection());
   const [shortcutsGlobal, shortcutsIsland] = splitAtSubheads(shortcutsSection(shortcutReport));
   // One page per leaf of the tree; only the one picked is shown (drawShell).
   const pages: Record<string, HTMLElement> = {
@@ -2111,6 +2337,10 @@ async function render() {
     "flow": page(flowMain),
     "flow-replacements": page(flowReplacements),
     "flow-dictionary": page(flowDictionary),
+    "flow-snippets": page(flowSnippets),
+    "flow-styles": page(flowStyles),
+    "flow-history": page(flowHistorySection()),
+    "flow-stats": page(flowStatsSection()),
     "shortcuts": page(shortcutsGlobal),
     "shortcuts-island": page(shortcutsIsland),
     "about": page(
@@ -2136,7 +2366,7 @@ const TREE: [string, [string, string][]][] = [
   [N_("AI models"), [["chat-providers", N_("Chat providers")], ["local-models", N_("Local models")]]],
   [N_("Pills & integrations"), [["pills", N_("Active pills")], ["integrations", N_("Integrations")]]],
   [N_("Voice"), [["voice", N_("Voice")], ["voice-web", N_("Web answers")], ["voice-debug", N_("Debugging")]]],
-  [N_("Flow dictation"), [["flow", N_("Flow dictation")], ["flow-replacements", N_("Replacements")], ["flow-dictionary", N_("Dictionary")]]],
+  [N_("Flow dictation"), [["flow", N_("Flow dictation")], ["flow-replacements", N_("Replacements")], ["flow-dictionary", N_("Dictionary")], ["flow-snippets", N_("Snippets")], ["flow-styles", N_("Styles")], ["flow-history", N_("History")], ["flow-stats", N_("Statistics")]]],
   [N_("Shortcuts"), [["shortcuts", N_("From anywhere")], ["shortcuts-island", N_("In the open island")]]],
   [N_("About"), [["about", N_("About")]]],
 ];
@@ -2205,6 +2435,7 @@ function drawShell(pages: Record<string, HTMLElement>) {
     for (const [key, button] of leafButtons) button.classList.toggle("on", key === current);
     heading.textContent = t(groupOf[current]);
     pane.scrollTop = 0;
+    flowRefreshers[current]?.();
   };
 
   const winButton = (label: string, cls: string, glyph: string, onClick: () => void) =>
