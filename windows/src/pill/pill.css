@@ -83,11 +83,13 @@
 
 /* Writing it down: no voice to show, only the line. */
 .pill-card[data-state="working"] .pill-dots,
+.pill-card[data-state="cleaning"] .pill-dots,
 .pill-card[data-state="message"] .pill-dots {
   display: none;
 }
 
-.pill-card[data-state="working"] .pill-caption {
+.pill-card[data-state="working"] .pill-caption,
+.pill-card[data-state="cleaning"] .pill-caption {
   animation: pill-pulse 1.1s ease-in-out infinite;
 }
 

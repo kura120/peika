@@ -1,7 +1,7 @@
 // The Flow pill's window (pill.html, src-tauri/src/flow/pill.rs): a small
 // card at the bottom centre of the screen with Peika, the dots that show the
 // voice, and a line for whatever needs saying. Rust says what to show with one
-// event, `flow-pill` ("listening", "locked", "working", "message", "hidden");
+// event, `flow-pill` ("listening", "locked", "working", "cleaning", "message", "hidden");
 // the level of the voice comes from the speech service's own `dictation`
 // events, for the dictation the state names.
 //
@@ -111,6 +111,8 @@ class Pill {
         return t("Hands-free");
       case "working":
         return t("Writing it down…");
+      case "cleaning":
+        return s.message === "translate" ? t("Translating…") : t("Cleaning up…");
       case "message":
         return messageText(s.message, s.detail);
       default:
@@ -147,7 +149,7 @@ class Pill {
       this.engine.enterListening();
     } else {
       this.engine.exitListening();
-      this.engine.setState(next.state === "working" ? "thinking" : "idle");
+      this.engine.setState(next.state === "working" || next.state === "cleaning" ? "thinking" : "idle");
     }
     this.startLoop();
   }

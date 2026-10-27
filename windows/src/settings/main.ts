@@ -12,7 +12,8 @@ import {
   recordPress, type Binding,
 } from "../core/shortcuts";
 import {
-  FLOW_KEYS, FLOW_KEY_LABELS, MAX_LENGTH, addReplacement, addWord, flowKeyName, removeAt,
+  FLOW_KEYS, FLOW_KEY_LABELS, FLOW_LANGUAGES, MAX_LANGUAGE, MAX_LENGTH, addReplacement, addWord, cleanupProviders,
+  cleanupTarget, flowKeyName, removeAt, sendsText,
 } from "../core/flow";
 import { DEFAULT_SETTINGS, type Settings, type WebSearchChoice } from "../core/state";
 import { SOUND_NAMES } from "../core/sound";
@@ -1555,6 +1556,8 @@ function flowSection(): HTMLElement {
     needsEngine.style.display = FLOW_HERE && s && !s.installed ? "" : "none";
   });
 
+  const [cleanupRows, cleanupNotice] = cleanupControls(change);
+
   return h(
     "section",
     {},
@@ -1574,6 +1577,8 @@ function flowSection(): HTMLElement {
       class: "hint",
       text: t("Peika looks at key presses on this computer only to know when you press this key, and Esc or another key while you are dictating. Nothing is recorded or stored; only the text is pasted."),
     }),
+    ...cleanupRows,
+    cleanupNotice,
     h("div", { class: "subhead", text: t("Replacements") }),
     h("div", {
       class: "hint",
@@ -1587,6 +1592,64 @@ function flowSection(): HTMLElement {
     }),
     ...dictionaryRows(change),
   );
+}
+
+/**
+ * Clean-up and translation by a model (flow/cleanup.rs): the rows, and the
+ * notice that says plainly where the text goes. Both are off until asked for.
+ */
+function cleanupControls(change: (patch: Partial<Settings["flow"]>) => Promise<void>): [HTMLElement[], HTMLElement] {
+  const notice = h("div", { class: "notice" });
+  const refresh = () => {
+    const target = t(cleanupTarget(settings.flow, settings.chatProvider).name);
+    const on = sendsText(settings.flow);
+    notice.className = on ? "notice warn" : "notice";
+    notice.textContent = on
+      ? t("The words you said, as text and never the audio, are sent to {provider} to be rewritten, with your key or to your server, and nowhere else.", { provider: target })
+      : t("Off, nothing is sent anywhere. Turned on, the words you said (text only, never the audio) go to {provider}.", { provider: target });
+  };
+  const update = (patch: Partial<Settings["flow"]>) => {
+    const done = change(patch);
+    refresh();
+    return done;
+  };
+
+  const clean = toggle(settings.flow.cleanup, (v) => void update({ cleanup: v }));
+
+  const language = h("input", {
+    type: "text",
+    list: "flow-languages",
+    placeholder: t("Off"),
+    maxlength: String(MAX_LANGUAGE),
+    spellcheck: "false",
+    value: settings.flow.translateTo,
+  }) as HTMLInputElement;
+  const languages = h("datalist", { id: "flow-languages" });
+  for (const name of FLOW_LANGUAGES) languages.append(h("option", { value: name }));
+  language.addEventListener("change", () => void update({ translateTo: language.value.trim().slice(0, MAX_LANGUAGE) }));
+
+  const provider = h("select", {}) as HTMLSelectElement;
+  const chat = providerDef(settings.chatProvider);
+  provider.append(h("option", { value: "", text: t("The chat’s provider ({name})", { name: t(chat.name) }) }));
+  const offered = cleanupProviders(settings);
+  // A provider chosen earlier and not shown now (a server since disconnected) stays visible.
+  const chosen = settings.flow.cleanupProvider;
+  if (chosen && !offered.some((p) => p.id === chosen)) offered.push(providerDef(chosen));
+  for (const p of offered) provider.append(h("option", { value: p.id, text: t(p.name) }));
+  provider.value = chosen;
+  provider.addEventListener("change", () => void update({ cleanupProvider: provider.value }));
+
+  refresh();
+  const rows = [
+    h("div", {
+      class: "hint",
+      text: t("A model removes hesitations and spoken corrections (“at 3, no, at 4” becomes “at 4”) before the words are pasted, or writes them in another language. If it is slow or fails, the words are pasted as heard."),
+    }),
+    h("div", { class: "row" }, h("label", { text: t("Clean up with a model") }), clean),
+    h("div", { class: "row" }, h("label", { text: t("Translate into") }), language, languages),
+    h("div", { class: "row" }, h("label", { text: t("Ask this provider") }), provider),
+  ];
+  return [rows, notice];
 }
 
 /** A small ✕ that takes an entry out of a list. */
