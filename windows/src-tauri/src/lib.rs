@@ -1090,6 +1090,9 @@ pub fn run() {
             flow::flow_pill_state,
             flow::flow_pill_finish,
             flow::flow_pill_cancel,
+            flow::store::flow_history,
+            flow::store::flow_stats,
+            flow::store::flow_history_clear,
             voice_say,
         ])
         .setup(move |app| {

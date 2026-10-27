@@ -117,11 +117,20 @@ pub struct FlowPref {
     pub replacements: Vec<(String, String)>,
     /// Words spelled the way the user spells them ("Supabase").
     pub dictionary: Vec<String>,
+    /// Keep the text of each dictation, to read again (flow/store.rs). Off: only
+    /// the numbers of each day are kept, no words.
+    pub keep_history: bool,
 }
 
 impl Default for FlowPref {
     fn default() -> Self {
-        Self { enabled: false, key: "RightCtrl".into(), replacements: Vec::new(), dictionary: Vec::new() }
+        Self {
+            enabled: false,
+            key: "RightCtrl".into(),
+            replacements: Vec::new(),
+            dictionary: Vec::new(),
+            keep_history: true,
+        }
     }
 }
 
@@ -557,7 +566,7 @@ mod tests {
   "cryptoCurrency": "EUR",
   "cryptoCoins": "DOGE, ADA",
   "awayMinutes": 25,
-  "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"] }
+  "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"], "keepHistory": true }
 }"##;
 
     fn custom() -> Value {
@@ -800,6 +809,22 @@ mod tests {
         assert!(loaded.flow.enabled);
         assert_eq!(loaded.flow.key, "RightCtrl");
         assert!(loaded.flow.dictionary.is_empty());
+        assert!(loaded.flow.keep_history);
+    }
+
+    #[test]
+    fn flow_keeps_a_history_unless_told_not_to() {
+        assert!(Settings::default().flow.keep_history);
+        let off = parse(&custom_with("flow", Some(json!({ "keepHistory": false })))).unwrap();
+        assert!(!off.flow.keep_history);
+        let (dir, file) = scratch("flow-history");
+        let mut settings = Settings::default();
+        settings.flow.keep_history = false;
+        save_to(&file, &settings).unwrap();
+        assert!(!load_from(&file).flow.keep_history);
+        let raw: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(raw["flow"]["keepHistory"], json!(false));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
