@@ -359,6 +359,21 @@ is not elevated type into one that is (UIPI): Peika checks first, leaves the
 words on the clipboard and says so in the pill, so you can paste them yourself.
 The same if the window you were in cannot be brought back.
 
+**History and statistics** (Settings → Flow dictation → History and Statistics).
+After a dictation is pasted, or left on the clipboard, Peika keeps its time,
+the program it went to (the executable's name, such as "slack"), its number of
+words, how many seconds it took and its text: the last 500, in
+`history.json` in the `flow` folder of Peika's local folder
+(`%LOCALAPPDATA%\Peikalow`, `~/.local/share/peika/flow` on Linux, closed to
+other users), newest first, with a Copy button on each. The numbers of each
+day (dictations, words, seconds) go to `days.json` next to it and are what the
+Statistics page draws: today, words per minute, days in a row and a chart of
+the last 14 days. **Empty the history** removes the texts and keeps the
+numbers. **Keep a history of what you dictate** (on by default) turned off
+keeps no text at all, drops the texts already kept and leaves only the
+numbers. Only text is ever kept, never sound, and none of it leaves the
+computer.
+
 **Privacy.**
 - Nothing is recorded. The sound stays in memory only until it is written down;
   the log says that a dictation happened, never what was said.
@@ -370,8 +385,7 @@ The same if the window you were in cannot be brought back.
   switching Flow off removes it and the pill's window.
 - The microphone is open only while you hold the key (or are hands-free), and
   "OK Peika" stands aside meanwhile.
-- Not yet: styles per app, snippets, history and statistics, and clean-up or
-  translation by a model. Flow pastes what was heard, with your replacements.
+- Not yet: styles per app, snippets, and clean-up or translation by a model. Flow pastes what was heard, with your replacements.
 
 ## Your pills
 
