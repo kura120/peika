@@ -364,7 +364,7 @@ After a dictation is pasted, or left on the clipboard, Peika keeps its time,
 the program it went to (the executable's name, such as "slack"), its number of
 words, how many seconds it took and its text: the last 500, in
 `history.json` in the `flow` folder of Peika's local folder
-(`%LOCALAPPDATA%\Peikalow`, `~/.local/share/peika/flow` on Linux, closed to
+(`%LOCALAPPDATA%\Peika\flow`, `~/.local/share/peika/flow` on Linux, closed to
 other users), newest first, with a Copy button on each. The numbers of each
 day (dictations, words, seconds) go to `days.json` next to it and are what the
 Statistics page draws: today, words per minute, days in a row and a chart of
