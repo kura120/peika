@@ -53,7 +53,7 @@ test("the tree's leaf ids are read from the settings source", () => {
   assert.ok(LEAVES.includes("claude-code"));
   assert.ok(LEAVES.includes("chat-providers"));
   assert.ok(LEAVES.includes("claude-api"));
-  assert.equal(LEAVES.length, 20);
+  assert.equal(LEAVES.length, 22);
 });
 
 test("every pill sends the island to a leaf of the settings tree", () => {

@@ -31,6 +31,7 @@
 mod logic;
 mod paste;
 mod pill;
+pub mod store;
 mod style;
 mod text;
 
@@ -226,6 +227,8 @@ fn send(msg: Msg) {
 struct Session {
     id: u64,
     front: Option<isize>,
+    /// When the key went down.
+    started: Instant,
 }
 
 struct Controller {
@@ -346,7 +349,7 @@ impl Controller {
         let front = os::front_window();
         match begin_dictation(&self.app) {
             Ok(id) => {
-                self.session = Some(Session { id, front });
+                self.session = Some(Session { id, front, started: Instant::now() });
                 self.pill_at = Some(Instant::now() + PILL_DELAY);
             }
             Err(why) => {
@@ -450,6 +453,9 @@ fn deliver(app: &AppHandle, session: Session, said: &str) {
     }
     let outcome = paste::paste(&words, session.front, FlowKey::from_setting(&prefs.key));
     crate::log::line(format!("flow: dictation {}: {outcome:?}", session.id));
+    if !matches!(outcome, paste::Outcome::Failed) {
+        store::record(app, &words, session.front, session.started.elapsed().as_secs_f64());
+    }
     match outcome {
         paste::Outcome::Pasted => pill::hide(app),
         paste::Outcome::Copied(paste::Why::Elevated) => pill::message(app, "elevated", ""),
