@@ -117,6 +117,16 @@ pub struct FlowPref {
     pub replacements: Vec<(String, String)>,
     /// Words spelled the way the user spells them ("Supabase").
     pub dictionary: Vec<String>,
+    /// A model tidies the words before they are pasted (hesitations, spoken
+    /// corrections; flow/cleanup.rs). Off until the user turns it on: the text
+    /// (never the audio) then goes to the provider below.
+    pub cleanup: bool,
+    /// Paste in this language whatever was said: a name or a code ("French",
+    /// "pt-BR"). Empty: off. The text goes to the same provider.
+    pub translate_to: String,
+    /// The provider asked for the clean-up and the translation: a chat
+    /// provider's id ("anthropic", "openai", "ollama"…). Empty: the chat's own.
+    pub cleanup_provider: String,
     /// A phrase to say and the whole text it stands for: ("my address", "12 Rue ...").
     pub snippets: Vec<(String, String)>,
     /// The user's own style for an app, over the built-in ones (flow/style.rs):
@@ -136,6 +146,9 @@ impl Default for FlowPref {
             key: "RightCtrl".into(),
             replacements: Vec::new(),
             dictionary: Vec::new(),
+            cleanup: false,
+            translate_to: String::new(),
+            cleanup_provider: String::new(),
             snippets: Vec::new(),
             styles: Vec::new(),
             keep_history: true,
@@ -575,7 +588,7 @@ mod tests {
   "cryptoCurrency": "EUR",
   "cryptoCoins": "DOGE, ADA",
   "awayMinutes": 25,
-  "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"], "snippets": [["my address", "12 Rue Pasteur"]], "styles": [["slack", "sentences"]], "keepHistory": true }
+  "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"], "snippets": [["my address", "12 Rue Pasteur"]], "styles": [["slack", "sentences"]], "keepHistory": true, "cleanup": true, "translateTo": "French", "cleanupProvider": "ollama" }
 }"##;
 
     fn custom() -> Value {
@@ -873,6 +886,24 @@ mod tests {
         // Pairs are written as two-item arrays, which is what the page sends back.
         let raw: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
         assert_eq!(raw["flow"]["replacements"], json!([["cloud code", "Claude Code"]]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn flow_s_clean_up_and_translation_are_off_until_asked_for_and_survive_a_save() {
+        let loaded = parse(&custom_with("flow", Some(json!({ "enabled": true })))).unwrap();
+        assert!(!loaded.flow.cleanup);
+        assert_eq!((loaded.flow.translate_to.as_str(), loaded.flow.cleanup_provider.as_str()), ("", ""));
+        let (dir, file) = scratch("flow-cleanup");
+        let mut settings = Settings::default();
+        settings.flow.cleanup = true;
+        settings.flow.translate_to = "French".into();
+        settings.flow.cleanup_provider = "ollama".into();
+        save_to(&file, &settings).unwrap();
+        assert_eq!(load_from(&file).flow, settings.flow);
+        let raw: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(raw["flow"]["translateTo"], "French");
+        assert_eq!(raw["flow"]["cleanupProvider"], "ollama");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

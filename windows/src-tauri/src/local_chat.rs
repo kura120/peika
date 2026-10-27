@@ -389,7 +389,7 @@ fn parse_sse_line(line: &str) -> Option<Result<String, String>> {
 }
 
 /// Removes finished `<think>…</think>` blocks (reasoning models such as DeepSeek-R1).
-fn filter_thinking_blocks(text: &str) -> String {
+pub(crate) fn filter_thinking_blocks(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("<think>") {

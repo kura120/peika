@@ -2,6 +2,9 @@
 // small rules for the lists the Settings page edits: what may be added, what a
 // duplicate is, how many there can be. Pure, so the tests can run it as it is.
 
+import { PROVIDERS, providerDef, visibleProviders, type ProviderDef } from "./providers";
+import type { Settings } from "./state";
+
 /** The keys that can be held to dictate: each a modifier on its own, so holding it does nothing in any app. */
 export const FLOW_KEYS = ["RightCtrl", "RightAlt", "RightShift"] as const;
 export type FlowKeyName = (typeof FLOW_KEYS)[number];
@@ -29,6 +32,12 @@ export interface FlowPref {
   styles: [string, string][];
   /** Keep the text of each dictation to read again. Off: only the numbers of each day (flow/store.rs). */
   keepHistory: boolean;
+  /** A model tidies the words before they are pasted (flow/cleanup.rs). Off by default: the text then goes to the provider. */
+  cleanup: boolean;
+  /** Paste in this language whatever was said: a name or a code. Empty: off. */
+  translateTo: string;
+  /** A chat provider's id, or empty for the chat's own. */
+  cleanupProvider: string;
 }
 
 export const DEFAULT_FLOW: FlowPref = {
@@ -39,7 +48,35 @@ export const DEFAULT_FLOW: FlowPref = {
   snippets: [],
   styles: [],
   keepHistory: true,
+  cleanup: false,
+  translateTo: "",
+  cleanupProvider: "",
 };
+
+/** The longest a language name may be (Rust cuts it the same). */
+export const MAX_LANGUAGE = 40;
+
+/** Languages suggested for "Translate into": any name or code may be typed. */
+export const FLOW_LANGUAGES = [
+  "English", "French", "Spanish", "German", "Italian", "Portuguese", "Dutch", "Russian", "Polish", "Turkish",
+  "Arabic", "Hindi", "Bengali", "Indonesian", "Japanese", "Korean", "Chinese (Simplified)", "Chinese (Traditional)",
+] as const;
+
+/** The providers clean-up can ask: the chat's, except Claude Code (no key, not a one-shot call). */
+export function cleanupProviders(settings: Settings): ProviderDef[] {
+  return visibleProviders(settings).filter((p) => p.id !== "claudecode");
+}
+
+/** Where the text goes: the provider chosen for clean-up, else the chat's. */
+export function cleanupTarget(flow: Pick<FlowPref, "cleanupProvider">, chatProvider: string): ProviderDef {
+  const id = flow.cleanupProvider.trim() || chatProvider;
+  return PROVIDERS.find((p) => p.id === id) ?? providerDef("anthropic");
+}
+
+/** True when clean-up or translation is on, so text leaves for a provider. */
+export function sendsText(flow: Pick<FlowPref, "cleanup" | "translateTo">): boolean {
+  return flow.cleanup || flow.translateTo.trim() !== "";
+}
 
 /** Entries a list may hold: a dictionary is not a database. */
 export const MAX_ENTRIES = 200;
@@ -124,13 +161,13 @@ export function removeAt<T>(list: T[], index: number): T[] {
 }
 
 /** What the pill window shows (src-tauri/src/flow/pill.rs `PillState`). */
-export type FlowPillName = "hidden" | "listening" | "locked" | "working" | "message";
+export type FlowPillName = "hidden" | "listening" | "locked" | "working" | "cleaning" | "message";
 
 export interface FlowPillState {
   state: FlowPillName;
   /** The dictation the level events are about. */
   id: number;
-  /** For "message": a code the page puts in words (pill/dots.ts `messageText`). */
+  /** For "message": a code the page puts in words (pill/dots.ts `messageText`). For "cleaning": "translate" when nothing else is asked. */
   message: string;
   detail: string;
 }
@@ -149,6 +186,9 @@ export function normalizeFlow(raw: unknown): FlowPref {
     snippets: pairs(r.snippets),
     styles: pairs(r.styles),
     keepHistory: r.keepHistory !== false,
+    cleanup: r.cleanup === true,
+    translateTo: text(r.translateTo) ? r.translateTo.trim().slice(0, MAX_LANGUAGE) : "",
+    cleanupProvider: text(r.cleanupProvider) ? r.cleanupProvider.trim() : "",
   };
 }
 

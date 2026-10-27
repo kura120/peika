@@ -57,6 +57,15 @@ export function messageText(code: string, detail: string): string {
       return t("Peika could not go back to the window you were in. The words are copied: press Ctrl+V.");
     case "copied":
       return t("Windows refused the keystroke. The words are copied: press Ctrl+V.");
+    case "asheard":
+      switch (detail) {
+        case "slow":
+          return t("The clean-up took too long, so the words are pasted as heard.");
+        case "unavailable":
+          return t("The clean-up has no provider ready (Settings → Flow dictation), so the words are pasted as heard.");
+        default:
+          return t("The clean-up did not work, so the words are pasted as heard.");
+      }
     default:
       return detail ? t("Flow stopped: {reason}", { reason: detail }) : t("Flow stopped.");
   }

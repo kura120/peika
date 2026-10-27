@@ -9,9 +9,9 @@ import { readFileSync } from "node:fs";
 import { installFakeDom } from "./fakedom.mjs";
 import { calls, sent } from "./tauri.mjs";
 import {
-  DEFAULT_FLOW, FLOW_KEYS, FLOW_KEY_LABELS, FLOW_STYLES, MAX_ENTRIES, MAX_LENGTH, MAX_SNIPPET, addReplacement,
-  addSnippet, addWord, appKey, barHeights, flowKeyName, flowStyleName, lastDays, lineBreaks, normalizeFlow, removeAt,
-  setStyle, showBreaks,
+  DEFAULT_FLOW, FLOW_KEYS, FLOW_KEY_LABELS, FLOW_LANGUAGES, FLOW_STYLES, MAX_ENTRIES, MAX_LANGUAGE, MAX_LENGTH, MAX_SNIPPET,
+  addReplacement, addSnippet, addWord, appKey, barHeights, cleanupProviders, cleanupTarget, flowKeyName, flowStyleName,
+  lastDays, lineBreaks, normalizeFlow, removeAt, sendsText, setStyle, showBreaks,
 } from "../src/core/flow.ts";
 import { DEFAULT_SETTINGS } from "../src/core/state.ts";
 import { Bridge } from "../src/core/bridge.ts";
@@ -32,8 +32,42 @@ beforeEach(() => {
 test("Flow is off by default, on right Ctrl, with nothing in its lists", () => {
   assert.deepEqual(DEFAULT_SETTINGS.flow, {
     enabled: false, key: "RightCtrl", replacements: [], dictionary: [], snippets: [], styles: [], keepHistory: true,
+    cleanup: false, translateTo: "", cleanupProvider: "",
   });
   assert.equal(DEFAULT_FLOW.enabled, false);
+});
+
+test("clean-up and translation are off by default and send nothing", () => {
+  assert.equal(DEFAULT_FLOW.cleanup, false);
+  assert.equal(DEFAULT_FLOW.translateTo, "");
+  assert.equal(DEFAULT_FLOW.cleanupProvider, "");
+  assert.equal(sendsText(DEFAULT_FLOW), false);
+  assert.equal(sendsText({ cleanup: true, translateTo: "" }), true);
+  assert.equal(sendsText({ cleanup: false, translateTo: " French " }), true);
+  assert.equal(sendsText({ cleanup: false, translateTo: "   " }), false);
+});
+
+test("the clean-up settings are read as they were saved, the language cut to one short line", () => {
+  assert.deepEqual(
+    normalizeFlow({ cleanup: true, translateTo: "  French ", cleanupProvider: " ollama " }),
+    { ...DEFAULT_FLOW, cleanup: true, translateTo: "French", cleanupProvider: "ollama" },
+  );
+  assert.deepEqual(normalizeFlow({ cleanup: "yes", translateTo: 4, cleanupProvider: null }), DEFAULT_FLOW);
+  assert.equal(normalizeFlow({ translateTo: "x".repeat(100) }).translateTo.length, MAX_LANGUAGE);
+  assert.ok(FLOW_LANGUAGES.includes("French"));
+});
+
+test("the text goes to the provider chosen for clean-up, else to the chat's, and never to Claude Code", () => {
+  assert.equal(cleanupTarget({ cleanupProvider: "" }, "openai").id, "openai");
+  assert.equal(cleanupTarget({ cleanupProvider: "google" }, "openai").id, "google");
+  assert.equal(cleanupTarget({ cleanupProvider: "" }, "nowhere").id, "anthropic");
+  const ids = cleanupProviders({ ...DEFAULT_SETTINGS, chatProvider: "claudecode" }).map((p) => p.id);
+  assert.ok(ids.includes("anthropic") && ids.includes("openai"));
+  assert.ok(!ids.includes("claudecode"));
+  // A model server appears once it is connected.
+  assert.ok(!ids.includes("ollama"));
+  const connected = cleanupProviders({ ...DEFAULT_SETTINGS, ollamaUrl: "http://127.0.0.1:11434" }).map((p) => p.id);
+  assert.ok(connected.includes("ollama"));
 });
 
 test("the keys to hold are three modifiers, each written the same in every language", () => {
@@ -258,6 +292,25 @@ test("every message code has its own words, and an unknown one says why Flow sto
   assert.equal(messageText("failed", ""), "Flow stopped.");
   // The ones that leave the words on the clipboard say how to paste them.
   for (const c of ["elevated", "away", "copied"]) assert.match(messageText(c, ""), /Ctrl\+V/);
+});
+
+test("a clean-up that could not run says why, in its own words", () => {
+  const slow = messageText("asheard", "slow");
+  const none = messageText("asheard", "unavailable");
+  const other = messageText("asheard", "failed");
+  assert.equal(new Set([slow, none, other]).size, 3);
+  for (const text of [slow, none, other]) assert.match(text, /as heard/);
+  assert.equal(messageText("asheard", ""), other);
+});
+
+test("the pill shows a waiting state while a model works, with words of its own", () => {
+  const rust = read("src-tauri/src/flow/pill.rs");
+  assert.match(rust, /state: "cleaning"/);
+  const page = read("src/pill/main.ts");
+  assert.match(page, /case "cleaning"/);
+  assert.match(page, /Cleaning up…/);
+  assert.match(page, /Translating…/);
+  assert.match(read("src/pill/pill.css"), /data-state="cleaning"/);
 });
 
 test("the messages are put in words in another language", () => {
