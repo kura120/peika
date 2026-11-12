@@ -1,7 +1,7 @@
 // How much memory does a RUNNING Peika use? Finds the Peika process and every
 // process below it (the web page processes: WebView2 on Windows, WebKitGTK on
 // Linux), reads their memory a few times and prints the median, so that later
-// work has a baseline to compare against (doc/rules/system.md, section 6).
+// work has a baseline to compare against.
 //
 //   node scripts/memory-baseline.mjs --label "island hidden, voice off"
 //
@@ -211,7 +211,7 @@ export function toReport({ label, time, build, executable, samples, rows, totals
 // The arguments. Returns { error } with a plain sentence for anything wrong.
 export function parseArgs(argv) {
   const out = { samples: 5, every: 1000, label: "", json: false };
-  const number = (flag, value, min) => {
+  const number = (value, min) => {
     const n = Number(value);
     return Number.isInteger(n) && n >= min ? n : null;
   };
@@ -222,11 +222,11 @@ export function parseArgs(argv) {
       if (i + 1 >= argv.length) return { error: "--label needs a text." };
       out.label = argv[++i];
     } else if (arg === "--samples") {
-      const n = number(arg, argv[++i], 1);
+      const n = number(argv[++i], 1);
       if (n === null) return { error: "--samples needs a whole number of at least 1." };
       out.samples = n;
     } else if (arg === "--every") {
-      const n = number(arg, argv[++i], 0);
+      const n = number(argv[++i], 0);
       if (n === null) return { error: "--every needs a whole number of milliseconds." };
       out.every = n;
     } else return { error: `I do not know ${arg}. Options: --samples <n>, --every <ms>, --label "<text>", --json.` };
@@ -236,13 +236,21 @@ export function parseArgs(argv) {
 
 // ---- Asking the system (the only part that needs a running machine) ----
 
+// Every wait has a limit: if PowerShell hangs, the script says so and stops.
+const POWERSHELL_TIMEOUT_MS = 30_000;
+
 function powershell(script) {
   return new Promise((done, fail) => {
     execFile(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", script],
-      { windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
-      (err, stdout) => (err ? fail(err) : done(stdout)),
+      { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: POWERSHELL_TIMEOUT_MS },
+      // On a timeout Node's message is the whole command line, which says
+      // nothing; say what happened.
+      (err, stdout) => {
+        if (!err) return done(stdout);
+        fail(err.killed ? new Error("PowerShell did not answer in 30 seconds") : err);
+      },
     );
   });
 }
