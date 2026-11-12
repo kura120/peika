@@ -131,130 +131,108 @@ answer on one line, still, until the next prompt.
 
 ### "OK Peika"
 
-Off by default. Turn it on in **Settings… → Voice**, say **"OK Peika"** (or
-"Hey Peika"), wait for the island to open on Peika listening, then say a
-command. A card says what was done, and the island goes back to where it was.
+Say **"OK Peika"** (or "Okay Peika", "Hey Peika"), wait for the island to open
+on Peika listening, then say what you want in your own words: "hold the music
+for a sec", "get rid of Stripe", "open Discord", "set a timer". A card says what
+was done, and the island goes back to where it was. Said in one breath, "OK
+Peika, next track" works too.
 
-| Say | What happens |
-|---|---|
-| "play", "pause", "next track", "previous track", "shuffle off", "repeat on" | Spotify, as from the music card. "play" opens Spotify when it is not running. |
-| "add GitHub", "show Vercel and Stripe" | Declares the pills, as in Settings → Active pills. |
-| "remove Notion", "hide Stripe and Notion" | Undeclares them. |
-| "replace n8n with GitHub", "keep only GitHub and Vercel" | Both at once. |
-| "switch to Cursor", "use Codex" | Changes the main pill (workspace tools only). |
-| "open Discord", "launch Visual Studio Code", "open my downloads" | Starts that app, or opens that folder of yours. Any app Windows lists under All apps, Microsoft Store apps included, by its name — and by what the name was heard as: "this cord" is Discord. A name that is no app is asked about (below); nothing is opened on a guess. |
-| "what about Steam?", "and Vercel too", "same for Stripe", "no, Discord", "put it back" | The last thing done, again with that name — or undone. See below. |
-| "never mind" | Closes without doing anything. |
+It is off by default, for Windows and English only, and it needs three things
+before it understands a command. **Settings… → Voice** turns it on and says
+which one is missing:
 
-With six pills already there, "add Gemini" makes Peika ask **which one to
-remove**: say its name and the two are swapped, say nothing and it is left as
-it is. Spotify takes no slot, as everywhere else.
+1. **The speech engine**, from **Hear free speech**: a download that writes down
+   what you say, run on this computer (see below).
+2. **A model server and a model**, under **Understand free speech with**: a
+   server you connected in Local models (Ollama, LM Studio or your own) and one
+   of its models.
+3. **An embedding model** on that server, under **Embedding model**. It is the
+   small model that finds which of Peika's actions a sentence is about
+   (`mxbai-embed-large` chose best in our measurements). With none chosen,
+   Peika says so and does nothing.
 
-**Did you mean.** When "open …" names no installed app — the speech model
-wrote "spy flight" for Spotify — Peika asks instead of giving up: **"Open
-Spotify?"**, or **"Spotify or Steam?"** when two are as near. "Yes", "yeah" or
-"do it" opens it; "no", "never mind" or saying nothing leaves it; another
-name said instead is tried. The nearest apps are found on this computer, by
-letters and by sound, without waiting for a model, and a guess is never opened
-without the yes. Nothing near is said at once. Windows' own recogniser is
-given no "yes" (it would hear one in too much): there, the app's name is the
-answer.
+**What Peika can do by voice.** The app lists what the assistant is allowed to
+do: the music, the pills and the main pill, starting an app or opening one of
+your folders, the agents' sessions, the permission or question that waits, a
+timer, the chat, the wardrobe, a few settings, a web search, pausing Peika. Each
+has a level: it only looks; it is done at once; it is done at once and can be
+undone ("undo", "put it back", "no, Vercel"); or it is shown first and done only
+when you click. A spoken "yes" never confirms: declining a permission, answering
+an agent's question or sending a chat message wait for your click on the card.
+What is not on the list does not exist for voice.
 
-The same goes for **any name**, not only an app's. A pill that was only nearly
-named is asked about before anything is touched — "remove strife" → **"Remove
-Stripe?"** — while a name said as it is written, or written with other letters
-for the same sounds ("versal", "get hub", "Kodaks"), is acted on at once: a
-common command is never questioned. The Parakeet speech models also say how
-sure they were of each word; a name they were unsure of is asked about unless
-it is spelt exactly. And when it is the verb that was misheard — "up in
-Spotify" — a word or two nobody knows followed by an app's name is asked about
-too ("Open Spotify?"), before any model. A question can be answered by voice
-or, as the island shows it, by a click.
+**How a sentence is handled.** The embedding model ranks the actions against
+what you said, then up to three steps follow, stopping at the first that
+answers:
 
-**A short memory.** For a minute and a half after a command, a sentence with
-no verb builds on it: after "open Spotify", "what about Steam?" opens Steam;
-after "add GitHub", "and Vercel too" adds Vercel; "put it back" or "undo"
-takes the last change back (a pill, the main pill, pause and play — not an app
-that was opened). After the wake phrase a bare name is enough ("Steam");
-without it, only a sentence that says it follows ("and …", "what about …").
-The last few turns are kept in memory only — never on disk, never in the log —
-and are forgotten when voice is turned off. Nothing about a permission is ever
-carried over from the sentence before. "That one" and "it" mean the pill the
-last command was about ("take that one off"), and a correction swaps: "no,
-Vercel" after "add GitHub" takes GitHub off and puts Vercel on.
+1. **At once.** When one action is far ahead of the others, it is done with no
+   model involved (never one that needs a click).
+2. **A model on your computer.** Otherwise the model you chose is given the
+   state of Peika, the last few turns and the best-ranked actions, and calls
+   them for you. It only proposes: each call goes through the same list and
+   levels, and a model on another computer changes nothing without a click.
+3. **Claude Code, through your plan.** Only if you turn on **Use the cloud when
+   needed**, and only when the local model hands the sentence up or cannot
+   answer it. It reaches the same actions the same way. Off, nothing is sent
+   to it.
 
-- **Windows only, English only, for now.** It uses Windows' own speech
+For a minute and a half after a command, the last few turns are kept in memory
+so that "what about Steam?", "and Vercel too" or "no, Discord" build on what was
+just done. They are never written to disk or to the log, and are forgotten when
+voice is turned off.
+
+**Did you mean.** A name Peika is not sure of is asked about instead of acted
+on: "Open Spotify?", or "Spotify or Steam?" when two are as near. The nearest
+apps are found on this computer, by letters and by sound. A name said as it is
+written, or spelled differently for the same sounds ("versal"), is acted on at
+once. A question can be answered by voice or with a click.
+
+- **Windows only, English only, for now.** "OK Peika" is heard by Windows' own
   recogniser, which needs the English speech pack (Settings → Time & language →
-  Speech) and nothing downloaded. Linux has no system recogniser and waits for
-  a bundled one; Settings says so there.
-- **On this computer only.** What the microphone hears never leaves it, and
-  there is no online recogniser to fall back on. A sentence is written down by
-  Windows' recogniser, by the downloaded engine or — if you choose it as the
-  speech model, below — by a model server running on this computer; Peika
-  refuses to send sound to any other address. The words stay here too, unless
-  you pick a model for what Peika does not know (below): they then go, as
-  text, to that server, wherever you pointed it. Nothing is recorded, and the
-  log says that something was recognised, never what.
+  Speech). Linux has no system recogniser and waits for a bundled one;
+  Settings says so there. "Peika" alone does not wake it.
+- **Sound stays on this computer.** What the microphone hears never leaves it,
+  and there is no online recogniser to fall back on. A sentence is written down
+  by the downloaded engine or — if you choose it as the speech model, below —
+  by a model server running on this computer; Peika refuses to send sound to
+  any other address. Nothing is recorded, and the log says that something was
+  recognised, never what. (Only the debug log, which you turn on yourself,
+  keeps more.)
+- **Text goes only where you pointed it.** Once written down, your words go as
+  text to the model server you chose for voice, wherever it runs (a toast says
+  so, once, if it is not this computer), and, if you turn it on, to Claude
+  Code. Nowhere else.
+- **Voice never approves a permission and never sends anything** without your
+  click: there is no action that approves a request.
 - **The microphone.** While voice is on, Windows shows a microphone in the
   taskbar. Turn off **Listen for « OK Peika »** to keep the microphone closed
   until you press the **Talk to Peika** shortcut (`Ctrl+Alt+V`, off by
-  default, in Settings → Shortcuts). The microphone is also closed while Peika
-  is paused from the tray, while the screen is locked and on battery saver.
-- **It can only hear what it was given**: the wake phrases and the commands
-  above, with any pill's name and any installed app's name in them (the first
-  200, as read when Peika starts). So it cannot be asked for a song, an
-  artist or a playlist, and Spotify's volume is out of reach on Windows. The
-  wake phrase and the command are two sentences, with a pause between them.
-  "Peika" alone does not wake it, and a wake phrase is ignored while a
-  permission or a question waits for you, or while the chat is open.
-- Voice never approves a permission and never sends anything: there is no
-  sentence for it.
+  default, in Settings → Shortcuts), which starts a command without the wake
+  phrase. The microphone is also closed while Peika is paused from the tray,
+  while the screen is locked and on battery saver.
+- **Keep listening after a command**: for a few seconds (8 by default; 5, 8 or
+  15, or none) after a command, another can be said without the wake phrase.
+  The island closes as usual; Peika keeps his listening look and an orange
+  glow stays under the island, moving with your voice, for as long as he still
+  listens. Anything said nearby in that time is heard too, but the island opens
+  only when it is a command: the model is told to ignore what was plainly meant
+  for someone else. It works only when the model server is on this computer.
 
-**A local model for what Peika does not know.** In Settings → Voice, pick a
-model server you connected in Local models (Ollama, LM Studio or your own) and
-one of its models. A sentence the parser does not know is then put to that
-model with the tools Peika offers — the music, the pills, an agent's session,
-the waiting permission (show it, or decline it), a timer, opening an app, one
-of your folders or a web address — or it answers a question
-about what Peika shows. The model only proposes: every call is checked against
-what was actually said before anything happens. A pill is touched only if the
-sentence names it, a permission is declined only if the sentence says decline,
-deny, refuse or reject, and asking to allow one just brings its card up. The
-model is also given the last few turns, so a follow-up arrives with what it
-follows, and — only when a name in the sentence may be a misheard app — the
-two or three installed apps it sounds like, which it may ask about; what it
-makes of a name is asked ("Open Discord?"), never opened. A word for opening
-may come from the turn before, and only after something was opened. On a table
-of 39 sentences said freely, `qwen2.5:7b-instruct` got 39 right in about 0.2 s
-each, and 27 of 28 exchanges with a misheard name or a follow-up, none of them
-dangerous (`node --import ./tests/setup.mjs scripts/voice-eval.mjs`); the
-checks were tuned on that same table, so expect less on sentences it has not
-seen. A model the server has to load first takes about five seconds: it is
-asked for as soon as Peika is woken, and an answer that takes more than six
-seconds is given up on, with a card that says so. What you say and what Peika shows go to
-that server and nowhere else; a toast says so once if it is not this computer.
-
-**Free speech.** Windows' recogniser only hears the sentences it was given.
-**Hear free speech** in Settings → Voice downloads an engine that hears anything
-(sherpa-onnx with the Moonshine tiny English model and the Silero voice
-detector, 38 MB, from the project's GitHub releases, checked against a pinned
-SHA-256) and uses it for the command:
+**Free speech.** Windows' recogniser only hears the wake phrase. **Hear free
+speech** in Settings → Voice downloads an engine that hears anything
+(sherpa-onnx, with a speech model and the Silero voice detector, from the
+project's GitHub releases, each checked against a pinned SHA-256) and uses it
+for the command. Without it, nothing listens for commands and Settings says
+why.
 
 - "OK Peika" is still heard by Windows' recogniser — the free engine writes
-  "peika" a different way every time — and then the command is yours to word:
-  "hold the music for a sec", "get rid of Stripe". It is written down once you
-  stop speaking, in a few hundredths of a second.
-- **Keep listening after a command**: for a few seconds (8 by default) after a
-  command, another can be said without the wake phrase. The view closes as
-  usual; Peika keeps his listening look and an orange glow stays under the
-  island, moving with your voice, for as long as he still listens. Anything said nearby in that time is heard
-  too, but the island opens only when it is a command: a keyboard is not taken
-  for a voice, and a word to someone else shows nothing unless the model, when
-  one is chosen, finds a command in it.
-- **Speech model**: three to choose from in Settings → Voice, each downloaded
-  when you ask for it and pinned like the rest. Words wrong on 69 synthesised
-  commands in three voices, and on twelve sentences of one real voice with an
-  accent — few, but the only real ones, and they decided the default:
+  "peika" a different way every time — and then the command is yours to word.
+  It is written down once you stop speaking.
+- **Speech model**: to choose in Settings → Voice, each downloaded when you ask
+  for it and pinned like the rest. **Parakeet 0.6b is used until you choose
+  another.** Words wrong on 69 synthesised commands in three voices, and on
+  twelve sentences of one real voice with an accent — few, but the only real
+  ones, and they decided the default:
 
   | Model | Download | Synthesised | Real voice | To write 3 s of speech |
   |---|---|---|---|---|
@@ -262,69 +240,49 @@ SHA-256) and uses it for the command:
   | Parakeet 110m (NVIDIA, CC BY 4.0) | 103 MB | 8 % | 44 % | 0.1 s |
   | Parakeet 0.6b v2 (NVIDIA, CC BY 4.0), the one used until you choose | 460 MB | 4 % | 15 % | 0.3 s |
 
-  All three write "Vercel" as "versal": names are matched afterwards, by how
-  they sound. Tried and left out: Moonshine base, Canary 180m, Whisper base.en
-  and small.en — no better than the Parakeet next to them, and slower.
+  A fourth, Parakeet 0.6b v3 (25 languages), is offered but not measured here;
+  voice itself is English only. The three measured models write "Vercel" as
+  "versal": names are matched afterwards, by how they sound. Tried and left
+  out: Moonshine base, Canary 180m, Whisper base.en and small.en — no better
+  than the Parakeet next to them, and slower.
 - **Or the model server hears.** When the server chosen under **Understand
   free speech with** is on this computer (127.0.0.1, localhost, ::1) and a
-  model is picked, that model is a fourth choice in **Speech model**, with
+  model is picked, that model is another choice in **Speech model**, with
   nothing to download: the sentence's sound goes to it, as a WAV file made in
-  memory, and it writes the words. It must be a model that takes audio.
-  It is not the model that hears best. `gemma4:e4b` through Ollama 0.40.2
-  got 5 % of words wrong on the same 69 synthesised commands, in 0.15 s a
-  sentence on a GPU — but on twelve sentences in a real voice (one speaker)
-  it got 34 % wrong, "switch to colgate" for "switch to Codex", where
-  Parakeet 0.6b got 15 %. What it can do that a speech model cannot is be
-  told what to expect: Peika gives it the pills' and the installed apps'
-  names with each sentence, and on those twelve it then got 15 to 22 % wrong
-  — about Parakeet 0.6b's, with nothing downloaded. Twelve sentences are few:
-  try it on your own voice. What to know:
+  memory, and it writes the words. It must be a model that takes audio, such
+  as Gemma 4. It is not the model that hears best: `gemma4:e4b` through
+  Ollama got 5 % of words wrong on the same 69 synthesised commands, but 34 %
+  on twelve sentences in a real voice, where Parakeet 0.6b got 15 %. What it
+  can do that a speech model cannot is be told what to expect: Peika gives it
+  the pills' and the installed apps' names with each sentence, and on those
+  twelve it then got 15 to 22 % wrong. Twelve sentences are few: try it on your
+  own voice. What to know:
   - The names of your pills and installed apps (140 at most) go to that
     server with the sound. It is on this computer.
   - Only a server on this computer. For any other address the choice is not
     in the list, and if the address changes later nothing is sent: the
     downloaded model hears. The request follows no redirect and uses no proxy.
-  - Peika waits 2.5 s for the answer. Past that, on an error or on an answer
-    without words, the smallest downloaded model writes the sentence instead;
-    with none downloaded, the command is missed. A model that does not take
-    audio is an error every time (Ollama answers so at once, once the model
-    is loaded).
-  - Ollama lets go of a model after five minutes and takes about 9 s to load
-    this one again, so Peika asks the server for one word (no sound) when
-    voice starts and each time it is woken. The first command after a long
-    quiet may still be the downloaded model's.
-  - It is the same model that is asked what a sentence means. Choosing Gemma
-    to hear means Gemma decides too, and on Peika's table it decides a little
-    less well and more slowly than `qwen2.5:7b-instruct` (37 of 39 in 0.8 s
-    against 38 in 0.2 s).
+  - Peika waits 2.5 s for the answer. Past that, or on an error, a downloaded
+    model writes the sentence instead.
+  - Ollama lets go of a model after a while, so Peika asks the server for one
+    word (no sound) when voice starts and each time it is woken. The first
+    command after a long quiet may still be the downloaded model's.
   - Without a downloaded model there is no voice detector either: a sentence
-    is then cut out by loudness, and a keyboard can be taken for one (Gemma
-    answered nothing to noise, silence and a tone when tried).
+    is then cut out by loudness, and a keyboard can be taken for one.
 - A command is at most about seven seconds: the model that writes it down
   fails on ten seconds and more, so a longer sentence — or music that never
   pauses — is cut there.
-- **One breath.** "OK Peika, next track" as one sentence works too: Windows'
-  recogniser says when the wake phrase ended, and what the microphone gave
-  after that moment is written down. Said with a pause — "OK Peika" … "next
-  track" — it works as before.
 - It runs on this computer. The sound stays in memory until it is written
-  down — by the engine, or by the model server on this computer when that is
-  the speech model — and is kept nowhere. **Remove** deletes the engine and
-  its models.
-- Windows only for now.
-
-Without the engine, the model is only reached by what the parser does not
-understand among the sentences Windows was given.
+  down and is kept nowhere. **Remove** deletes the engine and its models.
 
 **Peika answers out loud.** Also in Settings → Voice, and off until asked for:
 a voice (Supertonic 3, 129 MB, from the same GitHub releases, checked the same
-way) that says what a command did — "GitHub added", "Six active, remove
-which?", the answer to a question. A calm female voice, or a male one, both a
-little slower than the model's own pace. It is made on this computer in about
-half a second and played like Peika's other sounds: muted when Sound is off,
-quieter under the usual volume. He does not listen while he speaks, and he
-stops when the wake phrase is heard. English only, like listening: in another
-language the card says it. The voice's code is MIT and its model OpenRAIL-M.
+way) that says what a command did, or the answer to a question. A calm female
+voice, or a male one. It is made on this computer and played like Peika's other
+sounds: muted when Sound is off, quieter under the usual volume. He does not
+listen while he speaks, and he stops when the wake phrase is heard. English
+only, like listening: in another language the card says it. The voice's code is
+MIT and its model OpenRAIL-M.
 
 ## Flow dictation
 
