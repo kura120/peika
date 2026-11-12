@@ -148,7 +148,7 @@ which one is missing:
    of its models.
 3. **An embedding model** on that server, under **Embedding model**. It is the
    small model that finds which of Peika's actions a sentence is about
-   (`mxbai-embed-large` chose best in our measurements). With none chosen,
+   (`mxbai-embed-large` ranked best in our measurements). With none chosen,
    Peika says so and does nothing.
 
 **What Peika can do by voice.** The app lists what the assistant is allowed to
@@ -170,7 +170,7 @@ answers:
 2. **A model on your computer.** Otherwise the model you chose is given the
    state of Peika, the last few turns and the best-ranked actions, and calls
    them for you. It only proposes: each call goes through the same list and
-   levels, and a model on another computer changes nothing without a click.
+   levels, so whichever model asks, an action that needs a click waits for yours.
 3. **Claude Code, through your plan.** Only if you turn on **Use the cloud when
    needed**, and only when the local model hands the sentence up or cannot
    answer it. It reaches the same actions the same way. Off, nothing is sent
@@ -649,8 +649,8 @@ windows/
     desktop/           Peika's own little window, when he lives on the desktop
     toast/             the toasts' window: the stack, its timings and its look
     island/            state machine, hooks, integrations, what voice reports
-    voice/             what a command means and what it does (parser, pill names, runner,
-                       and the tools a local model may propose)
+    voice/             what voice makes of a sentence: ranking the actions, the turn, names
+                       and how sure they are, the short memory, questions, results
     views/             every island view
     settings/          the settings window
   src-tauri/           Rust backend: window, named pipe, Claude API, pollers
@@ -720,10 +720,11 @@ own window.
 
 ## What's different from the Mac version
 
-- "OK Peika" is in English and on Windows only (see ["OK Peika"](#ok-peika)),
-  and does the first three of the Mac's ten voice functions: music, the active
-  pills, the main pill. Music is Spotify alone, without songs by name or
-  volume; the limit Peika asks about is six pills, not four.
+- "OK Peika" is in English and on Windows only (see ["OK Peika"](#ok-peika)).
+  It understands free speech and does what the app lists for voice (music,
+  pills, apps, sessions and more). Music is Spotify alone, and it cannot pick a
+  track, an artist or a playlist; the limit Peika asks about is six pills, not
+  four.
 - No notch, so the island lives at the top centre of the screen and retracts into
   the top edge instead of hiding in a notch.
 - Permission approval works from **any** terminal; the Mac build only listens to
