@@ -100,6 +100,13 @@ jobs:
           cargo build --release -p peika-hook
           cargo test --workspace
 
+      # A report, not a gate: Clippy's findings are printed and never fail the
+      # job. The relay is built by the step above, and the system libraries
+      # were installed at the start.
+      - name: Lint report
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets
+
       # linuxdeploy is itself an AppImage; runners have no FUSE, so it unpacks
       # itself instead of mounting.
       - name: Build and pack
