@@ -65,3 +65,13 @@ jobs:
 
       - name: Rust tests
         run: cargo test --workspace --locked
+
+      # A report, not a gate: it prints what Clippy, the stricter TypeScript
+      # options and the source scan find, and never fails the job. One command
+      # per line, each on its own: PowerShell carries on after a failed one.
+      - name: Lint report
+        continue-on-error: true
+        run: |
+          cargo clippy --workspace --all-targets
+          npm run check:strict
+          npm run scan
