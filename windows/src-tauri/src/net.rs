@@ -109,16 +109,90 @@ pub fn anthropic_endpoint(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-/// A client for `url`: requests to this machine skip any system proxy, which
+/// What a call does when the server answers with a redirect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Redirects {
+    /// The redirect itself is the answer; nothing is followed.
+    None,
+    /// Follow at most this many hops, then fail.
+    Follow(usize),
+}
+
+/// The four limits every HTTP call has: a time to connect, a time for the
+/// whole call, a ceiling on the size of a body and a redirect policy. The
+/// defaults are the strict ones; a call that needs more says so.
+#[derive(Clone, Debug)]
+pub struct Limits {
+    pub connect: Duration,
+    pub total: Duration,
+    pub body: usize,
+    pub redirects: Redirects,
+}
+
+impl Limits {
+    /// Ten seconds to connect (never more than `total`), `MAX_BODY` for a body,
+    /// no redirects.
+    pub fn new(total: Duration) -> Self {
+        Limits { connect: Duration::from_secs(10).min(total), total, body: MAX_BODY, redirects: Redirects::None }
+    }
+
+    /// A different connect time, still never more than the total. No caller
+    /// needs one yet; it is part of the builder.
+    #[allow(dead_code)]
+    pub fn connect(mut self, connect: Duration) -> Self {
+        self.connect = connect.min(self.total);
+        self
+    }
+
+    /// A different body ceiling. Only the Linux media code uses it today.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn body(mut self, body: usize) -> Self {
+        self.body = body;
+        self
+    }
+
+    pub fn follow_redirects(mut self, hops: usize) -> Self {
+        self.redirects = Redirects::Follow(hops);
+        self
+    }
+
+    /// The body of `response`, refused past the ceiling. reqwest has no body
+    /// limit of its own, so the ceiling is applied here, as the body is read.
+    pub async fn read(&self, response: reqwest::Response) -> Result<Vec<u8>, String> {
+        read_capped(response, self.body).await
+    }
+
+    /// The body of `response` as a JSON value of type `T`, under the ceiling.
+    pub async fn read_json<T: serde::de::DeserializeOwned>(&self, response: reqwest::Response) -> Result<T, String> {
+        let bytes = self.read(response).await?;
+        // Not translated: the pollers that use this drop the error and show nothing.
+        serde_json::from_slice(&bytes).map_err(|_| "The answer is not valid JSON.".to_string())
+    }
+}
+
+/// The one place in the program that builds an HTTP client (a test checks it).
+/// With `loopback` set, requests to this machine skip any system proxy, which
 /// would otherwise see (and usually fail) a loopback address.
-pub fn client(url: &Url, timeout: Duration) -> Result<reqwest::Client, String> {
+pub fn build(limits: &Limits, loopback: bool) -> Result<reqwest::Client, String> {
+    let policy = match limits.redirects {
+        Redirects::None => reqwest::redirect::Policy::none(),
+        Redirects::Follow(hops) => reqwest::redirect::Policy::limited(hops),
+    };
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10).min(timeout))
-        .timeout(timeout);
-    if is_loopback_url(url) {
+        .connect_timeout(limits.connect.min(limits.total))
+        .timeout(limits.total)
+        .redirect(policy);
+    if loopback {
         builder = builder.no_proxy();
     }
     builder.build().map_err(|e| e.to_string())
+}
+
+/// A client for `url`. It follows up to 10 redirects, which is what reqwest
+/// did when the policy was left unset; callers that read the body use
+/// `read_capped` or `Limits::read`.
+pub fn client(url: &Url, timeout: Duration) -> Result<reqwest::Client, String> {
+    build(&Limits::new(timeout).follow_redirects(10), is_loopback_url(url))
 }
 
 /// The body of `response`, refused past `limit` bytes.
@@ -281,5 +355,112 @@ pub(crate) mod tests {
         // Under the ceiling: read whole.
         let url = serve_once("200 OK", "Content-Length: 3\r\n", b"abc".to_vec());
         assert_eq!(block_on(get(url)).unwrap(), b"abc");
+    }
+
+    fn local_url(listener: &std::net::TcpListener) -> String {
+        format!("http://{}", listener.local_addr().unwrap())
+    }
+
+    #[test]
+    fn limits_start_strict() {
+        let l = Limits::new(Duration::from_secs(60));
+        assert_eq!(l.connect, Duration::from_secs(10));
+        assert_eq!(l.total, Duration::from_secs(60));
+        assert_eq!(l.body, MAX_BODY);
+        assert_eq!(l.redirects, Redirects::None);
+        // A total shorter than ten seconds shortens the connect time too.
+        assert_eq!(Limits::new(Duration::from_secs(3)).connect, Duration::from_secs(3));
+        assert_eq!(Limits::new(Duration::from_secs(3)).connect(Duration::from_secs(30)).connect, Duration::from_secs(3));
+        let l = Limits::new(Duration::from_secs(60)).connect(Duration::from_secs(2)).body(10).follow_redirects(4);
+        assert_eq!((l.connect, l.body, l.redirects), (Duration::from_secs(2), 10, Redirects::Follow(4)));
+    }
+
+    #[test]
+    fn a_redirect_is_followed_only_when_the_limits_say_so() {
+        let get = |limits: Limits, url: String| async move {
+            let response = build(&limits, true).unwrap().get(url).send().await.unwrap();
+            let status = response.status().as_u16();
+            (status, limits.read(response).await.unwrap())
+        };
+        let total = Duration::from_secs(5);
+
+        // None: the 302 is the answer and the second listener is never contacted.
+        let second = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        second.set_nonblocking(true).unwrap();
+        let first = serve_once("302 Found", &format!("Location: {}/next\r\nContent-Length: 0\r\n", local_url(&second)), Vec::new());
+        let (status, _) = block_on(get(Limits::new(total), first));
+        assert_eq!(status, 302);
+        assert!(second.accept().is_err(), "the redirect target was contacted");
+
+        // Follow(1): the second server answers.
+        let target = serve_once("200 OK", "Content-Length: 4\r\n", b"next".to_vec());
+        let first = serve_once("302 Found", &format!("Location: {target}/next\r\nContent-Length: 0\r\n"), Vec::new());
+        let (status, body) = block_on(get(Limits::new(total).follow_redirects(1), first));
+        assert_eq!((status, body), (200, b"next".to_vec()));
+    }
+
+    #[test]
+    fn read_refuses_a_body_past_the_ceiling_and_accepts_one_that_fits() {
+        let limits = Limits::new(Duration::from_secs(5)).body(100);
+        let read = |url: String| {
+            let limits = limits.clone();
+            async move {
+                let response = build(&limits, true).unwrap().get(url).send().await.unwrap();
+                limits.read(response).await
+            }
+        };
+        let url = serve_once("200 OK", "", vec![b'x'; 101]);
+        assert!(block_on(read(url)).is_err());
+        let url = serve_once("200 OK", "Content-Length: 101\r\n", vec![b'x'; 101]);
+        assert!(block_on(read(url)).is_err());
+        let url = serve_once("200 OK", "", vec![b'x'; 100]);
+        assert_eq!(block_on(read(url)).unwrap().len(), 100);
+    }
+
+    #[test]
+    fn read_json_gives_the_value_or_an_error() {
+        let limits = Limits::new(Duration::from_secs(5));
+        let read = |url: String| {
+            let limits = limits.clone();
+            async move {
+                let response = build(&limits, true).unwrap().get(url).send().await.unwrap();
+                limits.read_json::<serde_json::Value>(response).await
+            }
+        };
+        let url = serve_once("200 OK", "", br#"{"a":1}"#.to_vec());
+        assert_eq!(block_on(read(url)).unwrap()["a"], 1);
+        let url = serve_once("200 OK", "", b"<html>not json".to_vec());
+        assert!(block_on(read(url)).is_err());
+    }
+
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn only_net_builds_an_http_client() {
+        // voice/hear.rs keeps its own builder until a voice issue moves it.
+        const ALLOWED: [&str; 2] = ["net.rs", "voice/hear.rs"];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&root, &mut files);
+        assert!(files.len() > 10, "the scan found no source files");
+        let needle = ["Client", "::builder("].concat();
+        let mut offenders = Vec::new();
+        for file in files {
+            let name = file.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(&file).unwrap();
+            if !ALLOWED.contains(&name.as_str()) && text.contains(&needle) {
+                offenders.push(name);
+            }
+        }
+        assert!(offenders.is_empty(), "build clients through net::build: {offenders:?}");
     }
 }
