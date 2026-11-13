@@ -85,6 +85,7 @@ mod speak;
 #[allow(dead_code)]
 mod speaker;
 mod session;
+mod waiting;
 
 // The engine, the microphone and the sentence cutter are the speech
 // service's, shared with dictation and the Notetaker (src/speech/).
@@ -108,10 +109,10 @@ const LEVEL_EVERY: Duration = Duration::from_millis(66);
 const POLL: Duration = Duration::from_millis(200);
 /// How often the lock screen and battery saver are looked at.
 const HOLD_CHECK: Duration = Duration::from_secs(2);
-/// The longest a sentence waits for the bundled model to finish loading. It
-/// is started when the command begins, so this is for a slow disk or a
-/// sentence said in one breath with the wake phrase; past it, the sentence is
-/// given up rather than the listener left standing.
+/// The longest a sentence waits in line for the bundled model to finish
+/// loading (the listener itself never waits: `Free::next`). It is started
+/// when the command begins, so this is for a slow disk; past it, the sentence
+/// is given up.
 #[cfg(windows)]
 const MODEL_WAIT: Duration = Duration::from_secs(15);
 
@@ -646,6 +647,9 @@ struct Free {
     /// The bundled model could not be had for a sentence and no model server
     /// can hear in its place: `cannot_hear` tells the listener, once.
     failed: bool,
+    /// Sentences that ended while the bundled model was still loading, to be
+    /// written down when it is here (waiting.rs).
+    waiting: waiting::Waiting,
     /// Set when the model server is asked first (hear.rs): where the settings
     /// are, which say at every sentence whether it still may be.
     server: Option<AppHandle>,
@@ -697,7 +701,7 @@ impl Free {
         // Only checked to be installed here: the model itself is loaded when a command comes.
         let engine = bundled.then(|| bundled::Bundled::new(Arc::new(models::take), Arc::new(models::give_back)));
         let names = if server.is_some() { hear::names(apps::installed_lately().iter().map(|app| app.name.as_str())) } else { Vec::new() };
-        let free = Self { engine, failed: false, server, names, capture: None, sentences, buffer: Vec::new(), recent: None, after_wake: None, peak: 0.0 };
+        let free = Self { engine, failed: false, waiting: waiting::Waiting::new(MODEL_WAIT), server, names, capture: None, sentences, buffer: Vec::new(), recent: None, after_wake: None, peak: 0.0 };
         free.warm();
         Ok(free)
     }
@@ -726,8 +730,19 @@ impl Free {
         }
     }
 
-    /// Listening for a command is over: the model goes back to the holder.
+    /// Sentences wait for the model: the session is kept in `Command` (or the
+    /// follow-up time) meanwhile, as when someone speaks (`listen`), so that
+    /// what was said is written down before listening for it ends.
+    fn waiting(&self) -> bool {
+        !self.waiting.is_empty()
+    }
+
+    /// Listening for a command is over: what still waits for the model is
+    /// dropped (the session ends only when nothing is wanted any more, and
+    /// not while a sentence waits: `listen` keeps it in `Command`), and the
+    /// model goes back to the holder.
     fn release(&mut self) {
+        self.waiting.clear();
         if let Some(engine) = self.engine.as_mut() {
             engine.release();
         }
@@ -775,49 +790,84 @@ impl Free {
         self.after_wake = None;
     }
 
-    fn written(&mut self, samples: &[f32]) -> Raw {
+    /// The sentence written down, or None when it has to wait for the bundled
+    /// model, which is on its way (`by_bundled`). The model server is asked
+    /// first only when `ask_server`: a sentence that has waited was already
+    /// refused by it, or it was not asked.
+    fn write_down(&mut self, samples: &[f32], ask_server: bool) -> Option<Raw> {
         let samples = vad::fitting(samples);
         // The model server first when it is the speech model; the bundled
         // model for what it did not hear, and nothing when there is neither.
         // Only the bundled model says how sure it is of each word.
-        let (heard, sure) = match self.by_server(samples) {
+        let (heard, sure) = match ask_server.then(|| self.by_server(samples)).flatten() {
             Some(heard) => (heard, Vec::new()),
-            None => self.by_bundled(samples),
+            None => self.by_bundled(samples)?,
         };
         let text = session::without_wake(&heard);
         // The wake phrase said again was taken off the front: its words' too.
         let kept = text.split_whitespace().count();
         let sure = if sure.len() >= kept { sure[sure.len() - kept..].to_vec() } else { Vec::new() };
         *SURE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (!sure.is_empty()).then(|| (text.clone(), sure));
-        if text.chars().any(char::is_alphanumeric) {
+        Some(if text.chars().any(char::is_alphanumeric) {
             Raw::Phrase { rule: Rule::Command, text, confidence: 1.0 }
         } else {
             Raw::Rejected
-        }
+        })
     }
 
     /// The sentence as the bundled model wrote it down, and how sure it was of
-    /// each word; nothing when it is not here or will not load. A load under
-    /// way is waited for, and one never started (the model server was asked
-    /// first, and did not hear) is started and waited for: never longer than
-    /// `MODEL_WAIT`.
-    fn by_bundled(&mut self, samples: &[f32]) -> (String, Vec<f32>) {
-        let Some(engine) = self.engine.as_mut() else { return Default::default() };
-        match engine.get(MODEL_WAIT) {
-            Ok(model) => model.item.transcribe_sure(vad::SAMPLE_RATE, samples),
-            // Slow, not broken: this sentence is lost, the load goes on, and
-            // the next one finds the model. Voice stays on.
-            Err(bundled::Unready::NotYet) => {
-                crate::log::line("voice: bundled engine: not ready in time");
-                Default::default()
-            }
-            Err(bundled::Unready::Failed(why)) => {
+    /// each word; None when the model is not here yet. It never waits for it
+    /// (the microphone must be read again within half a second): a model not
+    /// started is started, and the sentence waits in line (`submit`). A load
+    /// that failed is told once: with no model server to hear either, nothing
+    /// can, and the listener gives up as it does at the start (`NoEngine`).
+    fn by_bundled(&mut self, samples: &[f32]) -> Option<(String, Vec<f32>)> {
+        let Some(engine) = self.engine.as_mut() else { return Some(Default::default()) };
+        match engine.ready() {
+            bundled::Ready::Here(model) => Some(model.item.transcribe_sure(vad::SAMPLE_RATE, samples)),
+            bundled::Ready::Coming => None,
+            bundled::Ready::Failed(why) => {
                 // Why not, never the words.
                 crate::log::line(format!("voice: bundled engine: {why}"));
-                // With no model server to hear either, nothing can: the
-                // listener gives up as it does at the start (`NoEngine`).
                 self.failed = self.server.is_none();
-                Default::default()
+                // Nothing will write these down.
+                self.waiting.clear();
+                Some(Default::default())
+            }
+        }
+    }
+
+    /// A sentence to be written down: now when it can be, else it waits for
+    /// the model, in line behind those that came before it. `hold`: something
+    /// is to be told this turn, so the line is not to be passed.
+    fn submit(&mut self, samples: Vec<f32>, kind: waiting::Kind, hold: bool) -> Option<Raw> {
+        if !hold && self.waiting.is_empty() {
+            if let Some(written) = self.write_down(&samples, true) {
+                return waiting::settle(kind, written);
+            }
+        }
+        let dropped = self.waiting.push(samples, kind, Instant::now());
+        self.dropped(&dropped)
+    }
+
+    /// Sentences that were not written down in time: said in the log once,
+    /// and a sentence of its own is a miss, as one that was not words is.
+    fn dropped(&self, kinds: &[waiting::Kind]) -> Option<Raw> {
+        if kinds.is_empty() {
+            return None;
+        }
+        crate::log::line("voice: bundled engine: not ready in time");
+        kinds.contains(&waiting::Kind::Sentence).then_some(Raw::Rejected)
+    }
+
+    /// The sentence that has waited longest, written down if the model is here.
+    fn written_waiting(&mut self) -> Option<Raw> {
+        let waited = self.waiting.pop()?;
+        match self.write_down(&waited.samples, false) {
+            Some(written) => waiting::settle(waited.kind, written),
+            None => {
+                self.waiting.put_back(waited);
+                None
             }
         }
     }
@@ -826,16 +876,15 @@ impl Free {
     /// None when it was the wake phrase alone.
     fn tail(&mut self, sentence: &[f32], wake: Duration) -> Option<Raw> {
         let from = vad::after_wake(sentence.len(), wake)?;
-        match self.written(&sentence[from..]) {
-            // Only the end of "peika" was in there: not a command that was missed.
-            Raw::Rejected => None,
-            command => Some(command),
-        }
+        // Only the end of "peika" in there is not a command that was missed
+        // (`waiting::settle`).
+        self.submit(sentence[from..].to_vec(), waiting::Kind::Tail, false)
     }
 
     /// The wake phrase was just heard, ending `wake` into its sentence. If
     /// that sentence went on, the rest of it is the command: written down now
-    /// when it has already ended, else when it does (`next` knows where to cut).
+    /// when it has already ended and the model is here (else it waits for the
+    /// model), or when it ends (`next` knows where to cut).
     fn same_breath(&mut self, wake: Duration) -> Option<Raw> {
         if let Some((ended, sentence)) = self.recent.take() {
             if ended.elapsed() <= SAME_BREATH {
@@ -851,21 +900,45 @@ impl Free {
     /// Reads the microphone for at most `wait`. A sentence that just ended
     /// comes back written down — or `Rejected` when it was not words — when
     /// `wanted`; else it is only listened to, so the room stays known.
+    ///
+    /// The rule this follows: the listener comes back to the microphone at
+    /// least every half second, because that is all Windows keeps of it
+    /// (speech/capture.rs). So nothing here waits for the model: a sentence
+    /// that ends while it is not here waits in line, and at most one is
+    /// written down per turn, oldest first, so the microphone is read again
+    /// between two. A turn costs the reading (`wait`, 0.2 s) and one
+    /// transcription (a third of a second at most).
     fn next(&mut self, wait: Duration, wanted: bool) -> Result<Option<Raw>, Unavailable> {
         let Some(capture) = self.capture.as_mut() else { return Ok(None) };
         self.buffer.clear();
         capture.read(wait, &mut self.buffer)?;
         self.peak = self.peak.max(vad::loudness(&self.buffer));
-        let Some(sentence) = self.sentences.feed(&self.buffer) else { return Ok(None) };
+        let ended = self.sentences.feed(&self.buffer);
         if !wanted {
-            self.recent = Some((Instant::now(), sentence));
+            if let Some(sentence) = ended {
+                self.recent = Some((Instant::now(), sentence));
+            }
             return Ok(None);
         }
-        Ok(match self.after_wake.take() {
-            // The wake phrase alone ends its sentence: the command is still to come.
-            Some(wake) => self.tail(&sentence, wake),
-            None => Some(self.written(&sentence)),
-        })
+        // Those that waited too long are given up first.
+        let expired = self.waiting.expire(Instant::now());
+        let mut told = self.dropped(&expired);
+        if let Some(sentence) = ended {
+            let new = match self.after_wake.take() {
+                // The wake phrase alone ends its sentence: the command is still to come.
+                Some(wake) => {
+                    let from = vad::after_wake(sentence.len(), wake);
+                    from.and_then(|from| self.submit(sentence[from..].to_vec(), waiting::Kind::Tail, told.is_some()))
+                }
+                None => self.submit(sentence, waiting::Kind::Sentence, told.is_some()),
+            };
+            told = told.or(new);
+        }
+        // One of those that waited, if the model has come.
+        if told.is_none() {
+            told = self.written_waiting();
+        }
+        Ok(told)
     }
 
     fn speaking(&self) -> bool {
@@ -908,6 +981,10 @@ impl Free {
     fn prepare(&mut self) {}
 
     fn release(&mut self) {}
+
+    fn waiting(&self) -> bool {
+        false
+    }
 
     fn cannot_hear(&mut self) -> bool {
         false
@@ -1075,6 +1152,12 @@ fn listen(app: &AppHandle, generation: u64, plan: Plan, rx: &Receiver<Control>) 
                         tell(app, Heard::Cancelled);
                     }
                     return give_up(app, generation, Unavailable::NoEngine);
+                }
+                // A sentence waits for the model: what was said is not lost
+                // by the command's time running out before it is written down.
+                // It waits at most `MODEL_WAIT`, then it is dropped and this stops.
+                if freely && free.waiting() {
+                    session.speaking(Instant::now());
                 }
                 if hushed {
                     free.start_over();

@@ -2,16 +2,16 @@
 // coming, loaded on a helper thread meanwhile, here once it has arrived.
 //
 // The listener thread must go on reading the microphone while the model loads
-// (a second or two for a big one), so a load is started on a thread of its
-// own and the result comes back on a channel. The model itself is the shared
-// holder's (speech/models.rs); this is only voice's side of it, generic over
-// what it holds so that its tests need no engine.
+// (a second or two for a big one): Windows keeps only half a second of it. So
+// nothing here ever waits. A load is started on a thread of its own and the
+// result comes back on a channel, which `ready` only looks at. The model
+// itself is the shared holder's (speech/models.rs); this is only voice's side
+// of it, generic over what it holds so that its tests need no engine.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
 
 enum State<T> {
     /// Not loaded, nor being loaded.
@@ -21,12 +21,13 @@ enum State<T> {
     Here(T),
 }
 
-/// Why the model could not be had just now.
-#[derive(Debug, PartialEq)]
-pub enum Unready {
-    /// The wait ran out and the load goes on: the next sentence may find it.
-    NotYet,
-    /// The load failed, or its thread is gone: nothing is coming.
+/// Where the model is, as `ready` finds it.
+pub enum Ready<'a, T> {
+    Here(&'a T),
+    /// Still loading: look again on the next turn.
+    Coming,
+    /// The load failed, or its thread is gone: nothing is coming. Told once;
+    /// the model is then away again.
     Failed(String),
 }
 
@@ -57,42 +58,40 @@ impl<T: Send + 'static> Bundled<T> {
                 give_back(item);
             }
         });
-        // No thread: it is taken when a sentence needs it, as if never started.
         if spawned.is_ok() {
             self.state = State::Loading(rx);
         }
     }
 
-    /// The model: waiting up to `wait` for it, whether it was already on its
-    /// way or is started now (so the wait covers every path, and the listener
-    /// is never held by a load that has no end). A wait that runs out leaves
-    /// it coming, for the next sentence. Why it cannot be had is for the
-    /// caller to log.
-    pub fn get(&mut self, wait: Duration) -> Result<&T, Unready> {
+    /// The model if it is here; else a look at whether it has arrived, and it
+    /// is started when it was not coming. Never waits, and never loads on the
+    /// calling thread: whoever calls is the listener, which must be back at
+    /// the microphone in a fraction of a second. Without a thread to load on,
+    /// it fails rather than load here.
+    pub fn ready(&mut self) -> Ready<'_, T> {
         if matches!(self.state, State::Away) {
             self.start();
-            // Only when no thread could be made: loaded here, on this one, as
-            // the last resort (nothing else can load it).
             if matches!(self.state, State::Away) {
-                self.state = State::Here((self.load)().map_err(Unready::Failed)?);
+                return Ready::Failed("no thread to load it on".into());
             }
         }
-        if matches!(self.state, State::Loading(_)) {
-            if let State::Loading(rx) = std::mem::replace(&mut self.state, State::Away) {
-                match rx.recv_timeout(wait) {
-                    Ok(Ok(item)) => self.state = State::Here(item),
-                    Ok(Err(why)) => return Err(Unready::Failed(why)),
-                    Err(RecvTimeoutError::Timeout) => {
-                        self.state = State::Loading(rx);
-                        return Err(Unready::NotYet);
-                    }
-                    Err(RecvTimeoutError::Disconnected) => return Err(Unready::Failed("its loading stopped".into())),
+        if let State::Loading(rx) = &self.state {
+            match rx.try_recv() {
+                Ok(Ok(item)) => self.state = State::Here(item),
+                Ok(Err(why)) => {
+                    self.state = State::Away;
+                    return Ready::Failed(why);
+                }
+                Err(TryRecvError::Empty) => return Ready::Coming,
+                Err(TryRecvError::Disconnected) => {
+                    self.state = State::Away;
+                    return Ready::Failed("its loading stopped".into());
                 }
             }
         }
         match &self.state {
-            State::Here(item) => Ok(item),
-            _ => Err(Unready::Failed("it is not here".into())),
+            State::Here(item) => Ready::Here(item),
+            _ => Ready::Failed("it is not here".into()),
         }
     }
 
@@ -128,7 +127,7 @@ impl<T: Send + 'static> Drop for Bundled<T> {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread::sleep;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use super::*;
 
@@ -150,11 +149,24 @@ mod tests {
     }
 
     fn wait_for(count: &AtomicUsize, at_least: usize) -> bool {
-        let until = Instant::now() + Duration::from_secs(3);
+        let until = Instant::now() + Duration::from_secs(5);
         while count.load(Ordering::SeqCst) < at_least && Instant::now() < until {
             sleep(Duration::from_millis(10));
         }
         count.load(Ordering::SeqCst) >= at_least
+    }
+
+    /// Looks again until the model is here (or `Failed`), as the listener does each turn.
+    fn until_here(model: &mut Bundled<usize>) -> Option<usize> {
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until {
+            match model.ready() {
+                Ready::Here(item) => return Some(*item),
+                Ready::Failed(_) => return None,
+                Ready::Coming => sleep(Duration::from_millis(10)),
+            }
+        }
+        None
     }
 
     #[test]
@@ -165,46 +177,39 @@ mod tests {
         model.start();
         assert!(started.elapsed() < Duration::from_millis(50), "start does not wait for the load");
         assert!(model.loading() && !model.here());
-        assert_eq!(model.get(Duration::from_secs(3)).copied(), Ok(1));
+        assert_eq!(until_here(&mut model), Some(1));
         assert!(model.here());
         // Started again while here: nothing more is loaded.
         model.start();
-        assert_eq!((model.get(Duration::ZERO).copied(), loads.load(Ordering::SeqCst)), (Ok(1), 1));
-    }
-
-    #[test]
-    fn a_wait_that_runs_out_leaves_it_coming() {
-        // A wait of 20 ms against a load of 500 ms.
-        let (mut model, _, _) = fake(500, false);
-        model.start();
-        assert_eq!(model.get(Duration::from_millis(20)).copied(), Err(Unready::NotYet));
-        assert!(model.loading(), "still coming");
-        // The next sentence finds it.
-        assert_eq!(model.get(Duration::from_secs(5)).copied(), Ok(1));
-    }
-
-    #[test]
-    fn a_model_not_started_is_loaded_on_the_helper_thread_within_the_wait() {
-        let (mut model, loads, _) = fake(10, false);
-        assert_eq!(model.get(Duration::from_secs(5)).copied(), Ok(1));
+        assert_eq!(until_here(&mut model), Some(1));
         assert_eq!(loads.load(Ordering::SeqCst), 1);
     }
 
     #[test]
-    fn a_model_not_started_and_slower_than_the_wait_is_not_yet_not_a_hang() {
+    fn looking_never_waits_and_never_loads_on_the_calling_thread() {
+        // Never started: looking starts it, and says it is coming, at once.
         let (mut model, _, _) = fake(500, false);
         let asked = Instant::now();
-        assert_eq!(model.get(Duration::from_millis(20)).copied(), Err(Unready::NotYet));
-        assert!(asked.elapsed() < Duration::from_millis(250), "the wait was kept to");
+        assert!(matches!(model.ready(), Ready::Coming));
+        assert!(matches!(model.ready(), Ready::Coming));
+        assert!(asked.elapsed() < Duration::from_millis(50), "a look is not a wait");
         assert!(model.loading());
-        assert_eq!(model.get(Duration::from_secs(5)).copied(), Ok(1));
+        assert_eq!(until_here(&mut model), Some(1));
     }
 
     #[test]
     fn a_failed_load_is_reported_once() {
         let (mut model, _, _) = fake(10, true);
         model.start();
-        assert_eq!(model.get(Duration::from_secs(5)).copied(), Err(Unready::Failed("no such file".into())));
+        let until = Instant::now() + Duration::from_secs(5);
+        let why = loop {
+            match model.ready() {
+                Ready::Failed(why) => break why,
+                _ if Instant::now() > until => panic!("never failed"),
+                _ => sleep(Duration::from_millis(10)),
+            }
+        };
+        assert_eq!(why, "no such file");
         // Not here and not coming: nothing waits on it, nothing is reported again.
         assert!(!model.here() && !model.loading());
     }
@@ -212,7 +217,7 @@ mod tests {
     #[test]
     fn released_it_goes_back_to_the_holder() {
         let (mut model, _, given) = fake(0, false);
-        assert!(model.get(Duration::from_secs(1)).is_ok());
+        assert_eq!(until_here(&mut model), Some(1));
         model.release();
         assert_eq!(given.load(Ordering::SeqCst), 1);
         assert!(!model.here());
@@ -233,7 +238,7 @@ mod tests {
     #[test]
     fn dropped_it_is_given_back() {
         let (mut model, _, given) = fake(0, false);
-        assert!(model.get(Duration::from_secs(1)).is_ok());
+        assert_eq!(until_here(&mut model), Some(1));
         drop(model);
         assert_eq!(given.load(Ordering::SeqCst), 1);
     }
