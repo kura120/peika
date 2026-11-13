@@ -8,11 +8,21 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+/// The format of settings.json this build writes. A file with no `version` is
+/// version 0, from before there was one; `migrate` brings it up one step at a
+/// time. A file with a higher number was written by a newer Peika.
+pub const SETTINGS_VERSION: u32 = 1;
+
 /// A field the file lacks takes its value from `Default`, so a settings.json
-/// written by an older build still loads, whatever has been added since.
+/// written by an older build still loads, whatever has been added since. A
+/// field this build does not know is kept in `other` and written back, so
+/// going back to an older build after trying a newer one loses nothing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// The format of the file (`SETTINGS_VERSION`). Never lowered: a number
+    /// above ours stays as it is, so the newer build still knows its own file.
+    pub version: u32,
     pub sound_enabled: bool,
     pub sound_volume: f64,
     pub auto_close_interval: f64,
@@ -102,6 +112,9 @@ pub struct Settings {
     /// Flow dictation (flow/mod.rs): hold a key, speak, the words are pasted.
     /// Off until the user turns it on: off means no keyboard hook and no pill.
     pub flow: FlowPref,
+    /// Fields this build does not know, written by a newer one.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
 
 /// `Settings::flow`. The key and the lists are kept as they come, like
@@ -137,6 +150,9 @@ pub struct FlowPref {
     /// Keep the text of each dictation, to read again (flow/store.rs). Off: only
     /// the numbers of each day are kept, no words.
     pub keep_history: bool,
+    /// Fields this build does not know, written by a newer one.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
 
 impl Default for FlowPref {
@@ -152,6 +168,7 @@ impl Default for FlowPref {
             snippets: Vec::new(),
             styles: Vec::new(),
             keep_history: true,
+            other: Map::new(),
         }
     }
 }
@@ -202,6 +219,9 @@ pub struct VoicePref {
     /// is written to voice-debug.log on this computer (voice/debug.rs). Off
     /// until the user turns it on; turning it off deletes the file.
     pub debug_log: bool,
+    /// Fields this build does not know, written by a newer one.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
 
 impl VoicePref {
@@ -233,6 +253,7 @@ impl Default for VoicePref {
             web_answers: false,
             web_search: "browser".into(),
             debug_log: false,
+            other: Map::new(),
         }
     }
 }
@@ -244,6 +265,9 @@ pub struct DesktopPeikaPref {
     pub on_desktop: bool,
     /// Top-left corner of his window where the user last left him.
     pub spot: Option<DesktopSpot>,
+    /// Fields this build does not know, written by a newer one.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -261,6 +285,7 @@ fn default_model() -> String {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            version: SETTINGS_VERSION,
             sound_enabled: true,
             sound_volume: 0.12,
             auto_close_interval: 15.0,
@@ -301,7 +326,21 @@ impl Default for Settings {
             crypto_coins: "BTC, ETH, SOL".into(),
             away_minutes: 10,
             flow: FlowPref::default(),
+            other: Map::new(),
         }
+    }
+}
+
+impl Settings {
+    /// Puts back what a page cannot know: the version and the fields of a newer
+    /// build, which the page's copy of the settings does not carry (or drops),
+    /// taken from `current`. Nested ones too, `desktop_peika` included.
+    pub fn keep_unknown_from(&mut self, current: &Settings) {
+        self.version = current.version;
+        self.other = current.other.clone();
+        self.flow.other = current.flow.other.clone();
+        self.voice.other = current.voice.other.clone();
+        self.desktop_peika.other = current.desktop_peika.other.clone();
     }
 }
 
@@ -355,11 +394,38 @@ fn parse(bytes: &[u8]) -> Option<Settings> {
     if text.iter().all(u8::is_ascii_whitespace) {
         return Some(Settings::default());
     }
-    let Value::Object(fields) = serde_json::from_slice(text).ok()? else {
+    let Value::Object(mut fields) = serde_json::from_slice(text).ok()? else {
         return None;
     };
+    let from = stored_version(&fields);
+    migrate(&mut fields, from);
     let whole = serde_json::from_value(Value::Object(fields.clone()));
     Some(whole.unwrap_or_else(|_| salvage(fields)))
+}
+
+/// The `version` a file says it has: 0 when it has none, or not a number we can
+/// hold.
+fn stored_version(fields: &Map<String, Value>) -> u32 {
+    fields
+        .get("version")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0)
+}
+
+/// Brings the fields of a file of version `from` up to `SETTINGS_VERSION`, one
+/// step per version. A file already at or above it is left as it is: a higher
+/// one was written by a newer Peika and its `version` is never lowered.
+fn migrate(fields: &mut Map<String, Value>, from: u32) {
+    for step in from..SETTINGS_VERSION {
+        match step {
+            // Nothing moved: version 1 only started numbering the file.
+            0 => {
+                fields.insert("version".into(), Value::from(1));
+            }
+            _ => break,
+        }
+    }
 }
 
 /// Settings from the fields of a settings.json that does not load as a whole.
@@ -403,7 +469,19 @@ fn load_from(path: &Path) -> Settings {
             return Settings::default();
         }
     };
-    parse(&bytes).unwrap_or_else(|| {
+    let loaded = parse(&bytes);
+    if let Some(settings) = loaded.as_ref().filter(|s| s.version > SETTINGS_VERSION) {
+        // The number only: nothing else from the file goes into the log.
+        note(format!("settings.json was written by a newer Peika (version {})", settings.version));
+        // This build's first save writes only what it understands, so the
+        // original is kept beside it first (once: `set_aside` skips a copy
+        // whose contents are already there).
+        if let Err(err) = set_aside(path, "newer", &bytes) {
+            note(format!("{} could not be copied: {err}", path.display()));
+            protect(path);
+        }
+    }
+    loaded.unwrap_or_else(|| {
         match set_aside(path, "corrupt", &bytes) {
             Ok(copy) => note(format!(
                 "{} is not usable — kept as {}, using the defaults",
@@ -591,8 +669,12 @@ mod tests {
   "flow": { "enabled": true, "key": "RightAlt", "replacements": [["cloud code", "Claude Code"]], "dictionary": ["Supabase", "Peika"], "snippets": [["my address", "12 Rue Pasteur"]], "styles": [["slack", "sentences"]], "keepHistory": true, "cleanup": true, "translateTo": "French", "cleanupProvider": "ollama" }
 }"##;
 
+    /// What `CUSTOM` loads as: the same, plus the `version` a file from before
+    /// there was one is given. (`CUSTOM` itself is left as `main` wrote it.)
     fn custom() -> Value {
-        serde_json::from_str(CUSTOM).unwrap()
+        let mut value: Value = serde_json::from_str(CUSTOM).unwrap();
+        value["version"] = json!(SETTINGS_VERSION);
+        value
     }
 
     /// `CUSTOM` with one key replaced, or removed when `value` is `None`.
@@ -665,9 +747,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fields_are_ignored_and_the_known_ones_kept() {
+    fn unknown_fields_do_not_touch_the_known_ones_and_are_kept_beside_them() {
         let bytes = custom_with("somethingFromALaterVersion", Some(json!({ "a": [1, 2] })));
-        assert_eq!(shown(&parse(&bytes).unwrap()), custom());
+        let mut expected = custom();
+        expected["somethingFromALaterVersion"] = json!({ "a": [1, 2] });
+        assert_eq!(shown(&parse(&bytes).unwrap()), expected);
     }
 
     #[test]
@@ -1145,6 +1229,7 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "version",
                 "soundEnabled",
                 "soundVolume",
                 "autoCloseInterval",
@@ -1215,5 +1300,160 @@ mod tests {
         assert!(save_to(&file, &Settings::default()).is_err());
         assert_eq!(std::fs::read(&file).unwrap(), CUSTOM.as_bytes());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `CUSTOM` as a newer build might have written it: `extra` added at the
+    /// top level, and for each `(section, added)` the fields of `added` put
+    /// inside that section's object. It carries no `version`.
+    fn from_the_future(extra: Value, inside: &[(&str, Value)]) -> Vec<u8> {
+        let mut file: Value = serde_json::from_str(CUSTOM).unwrap();
+        for (key, value) in extra.as_object().unwrap() {
+            file[key] = value.clone();
+        }
+        for (section, added) in inside {
+            for (key, value) in added.as_object().unwrap() {
+                file[*section][key] = value.clone();
+            }
+        }
+        serde_json::to_vec(&file).unwrap()
+    }
+
+    /// The file `save_to` wrote, read back as JSON.
+    fn written(file: &Path) -> Value {
+        serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_file_written_by_main_loads_with_no_field_changed() {
+        // Everything in it comes back as written; only `version` is new.
+        let loaded = shown(&parse(CUSTOM.as_bytes()).unwrap());
+        let original: Value = serde_json::from_str(CUSTOM).unwrap();
+        for (key, value) in original.as_object().unwrap() {
+            assert_eq!(&loaded[key], value, "{key}");
+        }
+        assert_eq!(loaded, custom());
+    }
+
+    #[test]
+    fn a_field_from_a_newer_build_survives_a_load_and_a_save() {
+        let (dir, file) = scratch("future-top");
+        let future = json!({ "fromTheFuture": { "a": 1 } });
+        std::fs::write(&file, from_the_future(future.clone(), &[])).unwrap();
+        save_to(&file, &load_from(&file)).unwrap();
+        assert_eq!(written(&file)["fromTheFuture"], future["fromTheFuture"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_field_from_a_newer_build_inside_flow_voice_and_desktop_peika_survives() {
+        let (dir, file) = scratch("future-nested");
+        let added = json!({ "fromTheFuture": { "a": [1, 2], "b": null } });
+        let sections =
+            [("flow", added.clone()), ("voice", added.clone()), ("desktopPeika", added.clone())];
+        std::fs::write(&file, from_the_future(json!({}), &sections)).unwrap();
+        save_to(&file, &load_from(&file)).unwrap();
+        let after = written(&file);
+        for (section, _) in &sections {
+            assert_eq!(after[*section]["fromTheFuture"], added["fromTheFuture"], "in {section}");
+        }
+        // What this build knows is still where it was.
+        assert_eq!(after["flow"]["key"], "RightAlt");
+        assert_eq!(after["voice"]["brain"], "ollama");
+        assert_eq!(after["desktopPeika"]["spot"]["x"], 1500.5);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn what_a_page_does_not_send_back_is_kept_from_the_current_settings() {
+        let mut current = parse(&from_the_future(
+            json!({ "fromTheFuture": 1, "version": 7 }),
+            &[
+                ("flow", json!({ "x": 1 })),
+                ("voice", json!({ "y": 2 })),
+                ("desktopPeika", json!({ "z": 3 })),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(current.version, 7);
+        // The page's copy knows none of those, and changes one setting.
+        let mut page = Settings::default();
+        page.screen = "cursor".into();
+        page.keep_unknown_from(&current);
+        let after = shown(&page);
+        assert_eq!(after["version"], 7);
+        assert_eq!(after["fromTheFuture"], 1);
+        assert_eq!(after["flow"]["x"], 1);
+        assert_eq!(after["voice"]["y"], 2);
+        assert_eq!(after["desktopPeika"]["z"], 3);
+        assert_eq!(after["screen"], "cursor");
+        current.version = SETTINGS_VERSION;
+    }
+
+    #[test]
+    fn a_file_with_no_version_is_version_0_and_is_saved_as_the_current_one() {
+        let (dir, file) = scratch("version-0");
+        assert_eq!(stored_version(&Map::new()), 0);
+        std::fs::write(&file, CUSTOM).unwrap();
+        let loaded = load_from(&file);
+        assert_eq!(loaded.version, SETTINGS_VERSION);
+        save_to(&file, &loaded).unwrap();
+        assert_eq!(written(&file)["version"], json!(SETTINGS_VERSION));
+        assert!(kept(&dir, "newer").is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_from_a_newer_build_keeps_its_version_and_is_copied_aside_once() {
+        let (dir, file) = scratch("version-7");
+        let bytes = custom_with("version", Some(json!(7)));
+        std::fs::write(&file, &bytes).unwrap();
+
+        let first = load_from(&file);
+        let second = load_from(&file);
+        assert_eq!(first.version, 7);
+        assert_eq!(second.version, 7);
+        // Once, byte for byte, however often it is loaded.
+        assert_eq!(kept(&dir, "newer"), [bytes]);
+
+        save_to(&file, &second).unwrap();
+        assert_eq!(written(&file)["version"], 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_at_this_version_is_not_copied_aside() {
+        let (dir, file) = scratch("version-1");
+        std::fs::write(&file, custom_with("version", Some(json!(SETTINGS_VERSION)))).unwrap();
+        load_from(&file);
+        assert_eq!(names(&dir), ["settings.json"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_unknown_fields_and_the_version_survive_a_field_of_the_wrong_type() {
+        let (dir, file) = scratch("future-salvage");
+        let mut bytes: Value = serde_json::from_slice(&from_the_future(
+            json!({ "fromTheFuture": { "a": 1 }, "version": 7 }),
+            &[("flow", json!({ "x": 1 }))],
+        ))
+        .unwrap();
+        bytes["soundVolume"] = json!("loud");
+        std::fs::write(&file, serde_json::to_vec(&bytes).unwrap()).unwrap();
+
+        let loaded = load_from(&file);
+        assert_eq!(loaded.sound_volume, Settings::default().sound_volume);
+        save_to(&file, &loaded).unwrap();
+        let after = written(&file);
+        assert_eq!(after["version"], 7);
+        assert_eq!(after["fromTheFuture"], json!({ "a": 1 }));
+        assert_eq!(after["flow"]["x"], 1);
+        assert_eq!(after["flow"]["key"], "RightAlt");
+        assert_eq!(after["awayMinutes"], 25);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_default_settings_are_written_with_the_current_version() {
+        assert_eq!(defaults()["version"], json!(1));
     }
 }

@@ -105,6 +105,8 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         // Where Peika sits on the desktop is desktop.rs's to say, not a webview's.
         let mut settings = settings.clone();
         settings.desktop_peika = current.desktop_peika.clone();
+        // Nor what a newer build wrote that the page does not carry.
+        settings.keep_unknown_from(&current);
         *current = settings;
         (screen_changed, autostart_changed, shortcuts_changed)
     };
