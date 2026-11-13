@@ -89,3 +89,6 @@ gtk = "0.18"
 dbus = "0.9.12"
 # EWMH on X11 for "Open terminal", already in the tree (global-hotkey).
 x11rb = { version = "0.13", default-features = false }
+
+[lints]
+workspace = true

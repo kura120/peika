@@ -15,3 +15,15 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Lints shown as a report: every one is a warning, none fails a build. Each
+# crate opts in with `[lints] workspace = true`. They become errors later,
+# module by module, once the first findings are fixed.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+await_holding_lock = "warn"
+undocumented_unsafe_blocks = "warn"
