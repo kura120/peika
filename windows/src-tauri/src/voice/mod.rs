@@ -356,13 +356,13 @@ pub async fn voice_open_app(name: String) -> Option<Opened> {
     let installed = apps::installed_lately();
     let app = apps::find(&name, &installed)?.clone();
     crate::log::line("voice: open app");
-    let before = front::window();
     app.open();
+    let id = app.path.to_string_lossy().into_owned();
     let started = Instant::now();
     let mut seen = false;
     while !seen && started.elapsed() < SEEN_WITHIN {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        seen = front::came(before, &app.name);
+        seen = front::came(&id, &app.name);
     }
     Some(Opened { name: app.name, seen })
 }
@@ -370,46 +370,111 @@ pub async fn voice_open_app(name: String) -> Option<Opened> {
 /// The window in front, to tell whether an app that was started has come.
 #[cfg(windows)]
 mod front {
-    use windows::Win32::Foundation::HWND;
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HWND, MAX_PATH};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
 
-    /// The window in front now, as a number that can be kept across a wait.
-    pub fn window() -> isize {
-        unsafe { GetForegroundWindow().0 as isize }
+    /// The window in front is the app's, by `seen`: which program owns it and
+    /// what its title says. A window that only changed is not enough. Nothing
+    /// of the title or the path is kept or logged.
+    pub fn came(id: &str, name: &str) -> bool {
+        let Some((program, title)) = in_front() else { return false };
+        super::seen(id, name, &program, &title)
     }
 
-    /// Another program's window has come to the front since `before`, or the
-    /// one in front is that app's by its title (it was in front already).
-    pub fn came(before: isize, name: &str) -> bool {
+    /// The program of the window in front (its full path, empty when Windows
+    /// does not say) and its title; none when there is no window or it is
+    /// Peika's own.
+    fn in_front() -> Option<(String, String)> {
+        // SAFETY: plain Win32 calls on the window handle just returned; the
+        // buffers are local and their lengths are the ones passed along.
         unsafe {
             let now = GetForegroundWindow();
             if now.0.is_null() {
-                return false;
+                return None;
             }
             let mut owner = 0u32;
             GetWindowThreadProcessId(now, Some(&mut owner));
             if owner == std::process::id() {
-                return false;
-            }
-            if now.0 as isize != before {
-                return true;
+                return None;
             }
             let mut title = [0u16; 256];
-            let length = GetWindowTextW(HWND(now.0), &mut title).max(0) as usize;
-            super::titled(&String::from_utf16_lossy(&title[..length]), name)
+            let length = GetWindowTextW(HWND(now.0), &mut title).clamp(0, title.len() as i32) as usize;
+            Some((program_of(owner), String::from_utf16_lossy(&title[..length])))
         }
+    }
+
+    /// The full path of a process's program, or nothing when it cannot be asked
+    /// (a process of the system or of another user may not be opened).
+    fn program_of(process: u32) -> String {
+        if process == 0 {
+            return String::new();
+        }
+        // SAFETY: the handle is opened for this call only and closed before it
+        // returns; the buffer is local and `size` is its length in characters.
+        unsafe {
+            let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process) else {
+                return String::new();
+            };
+            let mut path = [0u16; MAX_PATH as usize * 2];
+            let mut size = path.len() as u32;
+            let asked = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut size);
+            let _ = CloseHandle(handle);
+            match asked {
+                Ok(()) => String::from_utf16_lossy(&path[..(size as usize).min(path.len())]),
+                Err(_) => String::new(),
+            }
+        }
+    }
+
+    /// Only the file name of the program in front, for the read-only check.
+    #[cfg(test)]
+    pub fn front_program_file() -> Option<String> {
+        in_front().map(|(program, _)| super::file_name(&program).to_string())
     }
 }
 
 #[cfg(not(windows))]
 mod front {
-    pub fn window() -> isize {
-        0
-    }
-
-    pub fn came(_before: isize, _name: &str) -> bool {
+    pub fn came(_id: &str, _name: &str) -> bool {
         false
     }
+}
+
+/// The last part of a path, whichever way its slashes lean.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn file_name(path: &str) -> &str {
+    path.rsplit(['\\', '/']).next().unwrap_or_default()
+}
+
+/// The window in front is that of the app that was asked for, not just a
+/// window that came: `id` is what Windows lists the app by (`App.path`, with
+/// or without `shell:AppsFolder\`), `program` the full path of the program
+/// that owns the front window, `title` its title. It is so when
+/// - the id ends in a program file name and the front program has the same
+///   (`...\Spotify.exe`), without case, or
+/// - the title is the app's (`titled`), or
+/// - the program's name without `.exe` is the app's name or its first word of
+///   four letters or more.
+/// Many Store apps run inside `ApplicationFrameHost.exe` and their id is not a
+/// file: for those only the title can say, and nothing more is tried.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn seen(id: &str, name: &str, program: &str, title: &str) -> bool {
+    let program = file_name(program.trim()).to_lowercase();
+    let wanted = file_name(id.trim()).to_lowercase();
+    if wanted.len() > ".exe".len() && wanted.ends_with(".exe") && wanted == program {
+        return true;
+    }
+    if titled(title, name) {
+        return true;
+    }
+    let stem = program.strip_suffix(".exe").unwrap_or(&program);
+    let name = name.trim().to_lowercase();
+    let first = name.split_whitespace().next().unwrap_or_default();
+    !stem.is_empty() && (stem == name || (first.chars().count() >= 4 && stem == first))
 }
 
 /// A window's title is that app's: it holds the app's name, or its first word
@@ -1382,7 +1447,7 @@ mod plan_tests {
 
 #[cfg(test)]
 mod seen_tests {
-    use super::titled;
+    use super::{seen, titled};
 
     #[test]
     fn a_window_is_an_apps_by_its_title() {
@@ -1395,6 +1460,85 @@ mod seen_tests {
         assert!(!titled("Inbox — Mail", "Spotify"));
         assert!(!titled("An app", "An Application"));
         assert!(!titled("anything", "  "));
+    }
+
+    const SPOTIFY: &str = r"C:\Users\me\AppData\Roaming\Spotify\Spotify.exe";
+
+    #[test]
+    fn a_window_of_another_program_that_merely_came_is_not_the_app() {
+        // The bug: the front window changed (the island closed, the previous
+        // window came back) and the old rule took that for the app. Nothing of
+        // this window's program or title is Spotify's: not seen.
+        assert!(!seen(SPOTIFY, "Spotify", r"C:\Program Files\Brave\brave.exe", "Inbox — Mail"));
+        assert!(!seen(SPOTIFY, "Spotify", r"C:\Windows\explorer.exe", ""));
+    }
+
+    #[test]
+    fn the_program_of_the_id_is_the_apps() {
+        assert!(seen(SPOTIFY, "Spotify", SPOTIFY, "Welcome"));
+        // Another folder, the same file name, no matter the case.
+        assert!(seen(SPOTIFY, "Spotify", r"D:\Apps\spotify.EXE", ""));
+        assert!(seen(r"shell:AppsFolder\C:\Apps\Spotify.exe", "Spotify", r"C:\Apps\Spotify.exe", ""));
+        assert!(!seen(SPOTIFY, "Spotify", r"C:\Apps\SpotifyHelper.exe", ""));
+    }
+
+    #[test]
+    fn a_title_of_the_app_is_enough() {
+        assert!(seen(SPOTIFY, "Spotify", r"C:\Apps\other.exe", "Spotify Premium"));
+    }
+
+    #[test]
+    fn a_known_folder_id_is_matched_by_its_file_name() {
+        let id = r"{6D809377-6AF0-444B-8957-A3773F02200E}\Notepad++\notepad++.exe";
+        assert!(seen(id, "Notepad++", r"C:\Program Files\Notepad++\notepad++.exe", "new 1"));
+        assert!(!seen(id, "Notepad++", r"C:\Windows\notepad.exe", "Untitled"));
+    }
+
+    #[test]
+    fn the_programs_name_can_be_the_apps() {
+        // The title holds nothing of the name and the id is not a file.
+        assert!(seen("Vendor.Figma_abc!App", "Figma", r"C:\x\figma.exe", "Untitled"));
+        assert!(seen("Vendor.Figma_abc!App", "Figma Desktop", r"C:\x\Figma.exe", "Untitled"));
+        // A first word under four letters, or another word, is not enough.
+        assert!(!seen("Vendor.App_abc!App", "Git Bash", r"C:\x\git.exe", "x"));
+        assert!(!seen("Vendor.App_abc!App", "Figma Desktop", r"C:\x\fig.exe", "x"));
+    }
+
+    #[test]
+    fn a_store_app_is_seen_by_its_title_only() {
+        let id = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
+        let host = r"C:\Windows\System32\ApplicationFrameHost.exe";
+        assert!(seen(id, "Calculator", host, "Calculator"));
+        assert!(!seen(id, "Calculator", host, "Settings"));
+        assert!(!seen(id, "Calculator", r"C:\Windows\explorer.exe", ""));
+    }
+
+    #[test]
+    fn several_words_are_matched_by_the_name_or_its_first_word() {
+        let id = r"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe";
+        assert!(seen(id, "Visual Studio Code", id, ""));
+        assert!(seen(id, "Visual Studio Code", r"C:\x\y.exe", "main.rs — Visual Studio Code"));
+        assert!(!seen(id, "Visual Studio Code", r"C:\x\devenv.exe", "Solution"));
+    }
+
+    #[test]
+    fn empty_strings_see_nothing() {
+        assert!(!seen("", "", "", ""));
+        assert!(!seen(SPOTIFY, "Spotify", "", ""));
+        assert!(!seen("", "Spotify", "", "Inbox"));
+        assert!(!seen(".exe", "", ".exe", ""));
+        assert!(!seen("", "  ", r"C:\x\.exe", "t"));
+    }
+
+    /// Read-only: is there a window in front, and which program file owns it.
+    /// Prints that file name only, never a title or a path.
+    /// `cargo test -p peika voice::seen_tests -- --ignored --nocapture`
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "reads the desktop"]
+    fn the_front_window_is_found() {
+        let file = super::front::front_program_file();
+        println!("front window found: {}, program file: {}", file.is_some(), file.unwrap_or_default());
     }
 }
 
