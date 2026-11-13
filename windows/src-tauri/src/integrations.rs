@@ -20,6 +20,7 @@ use tokio::sync::Notify;
 use crate::github::{self, GitHubActivity, GitHubPulse};
 use crate::island::WINDOW_LABEL;
 use crate::log;
+use crate::net;
 use crate::secrets;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,11 +48,42 @@ pub(crate) fn emit(app: &AppHandle, update: IntegrationUpdate) {
     let _ = app.emit_to(WINDOW_LABEL, "integration", update);
 }
 
-pub(crate) fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .build()
-        .unwrap_or_default()
+/// A client with the poller's limits, and those limits for reading what it
+/// gets back: every answer is read through them, so a hostile or broken
+/// service cannot make a poll hold an unbounded body.
+#[derive(Clone)]
+pub(crate) struct Http {
+    client: reqwest::Client,
+    limits: net::Limits,
+}
+
+impl Http {
+    pub(crate) fn get(&self, url: &str) -> reqwest::RequestBuilder {
+        self.client.get(url)
+    }
+
+    pub(crate) fn post(&self, url: &str) -> reqwest::RequestBuilder {
+        self.client.post(url)
+    }
+
+    /// The body of `response` as JSON, under the body ceiling.
+    pub(crate) async fn json(&self, response: reqwest::Response) -> Result<Value, String> {
+        self.limits.read_json(response).await
+    }
+}
+
+/// The client every poller uses. These services redirect today and keep
+/// doing so, up to 10 hops, written down here. If the client cannot be built
+/// the poll is skipped: an unlimited client is never the fallback.
+pub(crate) fn client() -> Option<Http> {
+    let limits = net::Limits::new(TIMEOUT).follow_redirects(10);
+    match net::build(&limits, false) {
+        Ok(client) => Some(Http { client, limits }),
+        Err(_) => {
+            log::line("integrations: could not build the HTTP client, poll skipped");
+            None
+        }
+    }
 }
 
 /// Set from the tray's Pause item. While it is on, nothing reaches the network:
@@ -157,7 +189,7 @@ fn status_error(code: u16, unauthorised_hint: &str) -> String {
 async fn poll_stripe(app: AppHandle) {
     let Some(key) = secrets::get("stripe-api-key") else { return };
     let auth = format!("Basic {}", crate::claude::base64_for(format!("{key}:").as_bytes()));
-    let http = client();
+    let Some(http) = client() else { return };
 
     let balance = http
         .get("https://api.stripe.com/v1/balance")
@@ -167,7 +199,7 @@ async fn poll_stripe(app: AppHandle) {
 
     let (amount, currency) = match balance {
         Ok(r) if r.status().is_success() => {
-            let json: Value = r.json().await.unwrap_or(json!({}));
+            let json: Value = http.json(r).await.unwrap_or(json!({}));
             let mut buckets: Vec<Value> = Vec::new();
             for k in ["available", "pending"] {
                 if let Some(arr) = json.get(k).and_then(Value::as_array) {
@@ -216,7 +248,7 @@ async fn poll_stripe(app: AppHandle) {
     if !response.status().is_success() {
         return;
     }
-    let json: Value = response.json().await.unwrap_or(json!({}));
+    let json: Value = http.json(response).await.unwrap_or(json!({}));
     let payments: Vec<Value> = json
         .get("data")
         .and_then(Value::as_array)
@@ -277,7 +309,7 @@ async fn poll_stripe(app: AppHandle) {
 
 async fn poll_github(app: AppHandle) {
     let Some(token) = secrets::get("github-token") else { return };
-    let http = client();
+    let Some(http) = client() else { return };
 
     let user = http
         .get("https://api.github.com/user")
@@ -296,7 +328,7 @@ async fn poll_github(app: AppHandle) {
         });
         return;
     }
-    let json: Value = response.json().await.unwrap_or(json!({}));
+    let json: Value = http.json(response).await.unwrap_or(json!({}));
     let public = json.get("public_repos").and_then(Value::as_i64).unwrap_or(0);
     let private = json
         .get("owned_private_repos")
@@ -312,8 +344,8 @@ async fn poll_github(app: AppHandle) {
         .send()
         .await;
     let stars: i64 = match repos {
-        Ok(r) if r.status().is_success() => r
-            .json::<Value>()
+        Ok(r) if r.status().is_success() => http
+            .json(r)
             .await
             .ok()
             .and_then(|v| v.as_array().cloned())
@@ -423,7 +455,8 @@ fn spawn_github_loops(app: AppHandle) {
 /// One authenticated GraphQL call. Partial errors are logged (as a count) and the
 /// data parsed anyway; only a response without `data` is dropped.
 async fn github_graphql(token: &str, query: &str, what: &str) -> Option<Value> {
-    let response = client()
+    let Some(http) = client() else { return None };
+    let response = http
         .post("https://api.github.com/graphql")
         .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json")
@@ -439,7 +472,7 @@ async fn github_graphql(token: &str, query: &str, what: &str) -> Option<Value> {
         log::line(format!("github {what} HTTP {}", response.status().as_u16()));
         return None;
     }
-    let root: Value = response.json().await.ok()?;
+    let root: Value = http.json(response).await.ok()?;
     let errors = github::graphql_error_count(&root);
     if errors > 0 {
         log::line(format!("github {what} GraphQL errors: {errors}"));
@@ -570,7 +603,8 @@ pub fn settings_saved(app: &AppHandle, active_integrations: &[String]) {
 
 async fn poll_vercel(app: AppHandle) {
     let Some(token) = secrets::get("vercel-token") else { return };
-    let response = client()
+    let Some(http) = client() else { return };
+    let response = http
         .get("https://api.vercel.com/v6/deployments?limit=5")
         .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/json")
@@ -586,7 +620,7 @@ async fn poll_vercel(app: AppHandle) {
         });
         return;
     }
-    let json: Value = response.json().await.unwrap_or(json!({}));
+    let json: Value = http.json(response).await.unwrap_or(json!({}));
     let terminal = ["READY", "ERROR", "CANCELED"];
     let deployments: Vec<Value> = json
         .get("deployments")
@@ -642,7 +676,8 @@ async fn poll_vercel(app: AppHandle) {
 
 async fn poll_resend(app: AppHandle) {
     let Some(key) = secrets::get("resend-api-key") else { return };
-    let response = client()
+    let Some(http) = client() else { return };
+    let response = http
         .get("https://api.resend.com/emails?limit=100")
         .header("Authorization", format!("Bearer {key}"))
         .header("Accept", "application/json")
@@ -658,7 +693,7 @@ async fn poll_resend(app: AppHandle) {
         });
         return;
     }
-    let json: Value = response.json().await.unwrap_or(json!({}));
+    let json: Value = http.json(response).await.unwrap_or(json!({}));
     let total = json
         .get("total")
         .or_else(|| json.get("count"))
@@ -699,7 +734,8 @@ async fn poll_resend(app: AppHandle) {
 
 async fn poll_notion(app: AppHandle) {
     let Some(token) = secrets::get("notion-api-key") else { return };
-    let response = client()
+    let Some(http) = client() else { return };
+    let response = http
         .post("https://api.notion.com/v1/search")
         .header("Authorization", format!("Bearer {token}"))
         .header("Notion-Version", "2022-06-28")
@@ -720,7 +756,7 @@ async fn poll_notion(app: AppHandle) {
         });
         return;
     }
-    let json: Value = response.json().await.unwrap_or(json!({}));
+    let json: Value = http.json(response).await.unwrap_or(json!({}));
     let pages: Vec<Value> = json
         .get("results")
         .and_then(Value::as_array)
@@ -791,7 +827,8 @@ fn parse_notion_page(obj: &Value) -> Option<Value> {
 
 async fn poll_calcom(app: AppHandle) {
     let Some(key) = secrets::get("calcom-api-key") else { return };
-    let response = client()
+    let Some(http) = client() else { return };
+    let response = http
         .get("https://api.cal.com/v2/bookings?status=upcoming")
         .header("Authorization", format!("Bearer {key}"))
         .header("cal-api-version", "2024-08-13")
@@ -807,7 +844,7 @@ async fn poll_calcom(app: AppHandle) {
         });
         return;
     }
-    let json: Value = response.json().await.unwrap_or(json!({}));
+    let json: Value = http.json(response).await.unwrap_or(json!({}));
     let bookings: Vec<Value> = json
         .get("data")
         .and_then(Value::as_array)
@@ -855,7 +892,7 @@ async fn poll_n8n(app: AppHandle) {
         return;
     };
     let base = raw_base.trim_end_matches('/').to_string();
-    let http = client();
+    let Some(http) = client() else { return };
 
     // Same two shapes as the Swift poller: the public API first, then /rest.
     let list_urls = [
@@ -874,7 +911,7 @@ async fn poll_n8n(app: AppHandle) {
             log::line(format!("n8n list HTTP {}", response.status()));
             continue;
         }
-        let Ok(json) = response.json::<Value>().await else { continue };
+        let Ok(json) = http.json(response).await else { continue };
         items = match &json {
             Value::Object(o) => o.get("data").and_then(Value::as_array).cloned(),
             Value::Array(a) => Some(a.clone()),
@@ -917,7 +954,7 @@ async fn poll_n8n(app: AppHandle) {
         if !response.status().is_success() {
             continue;
         }
-        let Ok(json) = response.json::<Value>().await else { continue };
+        let Ok(json) = http.json(response).await else { continue };
         name = json
             .get("workflowData")
             .and_then(|w| w.get("name"))

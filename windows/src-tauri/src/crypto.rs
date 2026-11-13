@@ -234,7 +234,7 @@ impl Failure {
 }
 
 /// One GET, answered only by HTTP 200.
-async fn get_json(http: &reqwest::Client, url: &str) -> Result<Value, Failure> {
+async fn get_json(http: &integrations::Http, url: &str) -> Result<Value, Failure> {
     let response = http
         .get(url)
         .header("Accept", "application/json")
@@ -245,7 +245,7 @@ async fn get_json(http: &reqwest::Client, url: &str) -> Result<Value, Failure> {
     if status != StatusCode::OK {
         return Err(Failure::Status(status.as_u16()));
     }
-    response.json::<Value>().await.map_err(|_| Failure::Unreadable)
+    http.json(response).await.map_err(|_| Failure::Unreadable)
 }
 
 /// What one coin's fetch brought back.
@@ -256,7 +256,7 @@ struct Fetched {
 }
 
 async fn fetch_coin(
-    http: reqwest::Client,
+    http: integrations::Http,
     exchange: Exchange,
     currency: &'static str,
     symbol: String,
@@ -356,7 +356,7 @@ pub async fn poll(app: AppHandle) {
     let Some(request) = read_request(&app) else { return };
     let due = CACHE.lock().unwrap().due(&request.key(), &request.coins, Instant::now());
 
-    let http = integrations::client();
+    let Some(http) = integrations::client() else { return };
     let tasks: Vec<_> = request
         .coins
         .iter()

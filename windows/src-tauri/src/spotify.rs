@@ -1721,16 +1721,14 @@ mod linux {
     }
 
     async fn fetch(url: &str) -> Option<Vec<u8>> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .ok()?;
+        // No redirects: cover art comes from the address the player gave.
+        let limits = crate::net::Limits::new(Duration::from_secs(10)).body(ARTWORK_LIMIT);
+        let client = crate::net::build(&limits, false).ok()?;
         let response = client.get(url).send().await.ok()?;
         if !response.status().is_success() {
             return None;
         }
-        crate::net::read_capped(response, ARTWORK_LIMIT).await.ok()
+        limits.read(response).await.ok()
     }
 
     fn finish_artwork(app: &AppHandle, url: String, bytes: Option<Vec<u8>>) {
