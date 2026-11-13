@@ -118,6 +118,24 @@ pub async fn voice_embed(app: AppHandle, texts: Vec<String>) -> Option<Vec<Vec<f
 /// The embedding models the server chosen for voice has, by name, for
 /// Settings → Voice. Empty when no server is chosen, it does not answer, or it
 /// has none.
+/// How long the model server is tried when asking whether it is there at all. A closed port takes about two seconds to refuse on Windows, so less would call it slow, not off.
+const PROBE: Duration = Duration::from_secs(4);
+
+/// Whether the model server chosen for voice can be reached at all, for the
+/// island to ask after a failure: a server that is off is not a model that did
+/// not answer, and the user is told which. False only when no connection could
+/// be made; a server that answers anything, or is slow, is there.
+#[tauri::command]
+pub async fn voice_server_reachable(app: AppHandle) -> bool {
+    let Some(settings) = settings_of(&app) else { return true };
+    let Some(server) = local_chat::server(&settings, &settings.voice.brain) else { return true };
+    let there = local_chat::reachable(&server, PROBE).await;
+    if !there {
+        crate::log::line("voice: the model server cannot be reached");
+    }
+    there
+}
+
 #[tauri::command]
 pub async fn voice_embed_models(app: AppHandle) -> Vec<String> {
     let Some(settings) = settings_of(&app) else { return Vec::new() };

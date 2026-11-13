@@ -19,6 +19,7 @@ const WORDS = {
 const TURN_WORDS = {
   noModel: () => "Voice needs a model server", silent: () => "The model did not answer",
   noEmbedding: () => "Voice needs an embedding model", embedSilent: () => "The embedding model did not answer",
+  serverOff: () => "The model server isn't running",
   notUnderstood: () => "Not recognised", beyond: () => "More than I can do here", askingCloud: () => "Asking a bigger model…",
   pardon: () => "Sorry, I didn't catch that",
 };
@@ -163,9 +164,9 @@ const says = (text) => ({ calls: [], text });
 /** An embedding model that finds every capability as near as any other: a test that is not about the ranking. */
 const flat = async (texts) => texts.map(() => [1]);
 
-function turns({ embed = flat, embedChosen = true, local = null, cloud = null, publish, followUp = false } = {}) {
+function turns({ embed = flat, embedChosen = true, local = null, cloud = null, publish, followUp = false, reachable } = {}) {
   return new VoiceTurns({
-    registry: app.registry, embed, embedChosen: () => embedChosen, local: () => local, cloud: () => cloud, publish, followUp: () => followUp, words: TURN_WORDS, now: () => now,
+    registry: app.registry, embed, embedChosen: () => embedChosen, local: () => local, cloud: () => cloud, publish, followUp: () => followUp, reachable, words: TURN_WORDS, now: () => now,
   });
 }
 
@@ -300,6 +301,29 @@ test("with no embedding model voice says it needs one, and with one that does no
   assert.deepEqual(app.state.log, []);
   // Without the wake phrase it is said too: the sentence was taken as said to Peika.
   assert.deepEqual((await turns({ embed: async () => null, local: local.model, followUp: true }).hear("pause the music", { wake: false })).result, { outcome: "failure", message: "The embedding model did not answer" });
+});
+
+test("when the model server cannot be reached at all, the turn says it is off; a reachable one keeps the usual words", async () => {
+  const local = scripted(calls(call("pause_music")));
+  const off = { outcome: "failure", message: "The model server isn't running" };
+  const asked = [];
+  const down = async () => { asked.push(1); return false; };
+  assert.deepEqual((await turns({ embed: async () => null, local: local.model, reachable: down }).hear("pause the music")).result, off);
+  assert.equal(asked.length, 1);
+  assert.deepEqual((await turns({ embed: async () => null, local: local.model, followUp: true, reachable: down }).hear("pause the music", { wake: false })).result, off);
+  for (const reachable of [async () => true, undefined, async () => { throw new Error("no"); }]) {
+    const said = await turns({ embed: async () => null, local: local.model, reachable }).hear("pause the music");
+    assert.deepEqual(said.result, { outcome: "failure", message: "The embedding model did not answer" });
+  }
+  // Not asked when no embedding model is chosen: that is another message.
+  const none = await turns({ embed: async () => null, embedChosen: false, local: local.model, reachable: down }).hear("pause the music");
+  assert.equal(none.result.message, "Voice needs an embedding model");
+  // The local model that does not answer, on a server that is off or on.
+  const mute = async () => null;
+  assert.deepEqual((await turns({ local: mute, reachable: down }).hear("pause the music")).result, off);
+  const there = await turns({ local: mute, reachable: async () => true }).hear("pause the music");
+  assert.deepEqual(there.result, { outcome: "failure", message: "The model did not answer" });
+  assert.equal(local.asked.length, 0);
 });
 
 test("the wake phrase gets the embedding model ready, and the sentence after it waits for that, not for a second embedding", async () => {

@@ -96,6 +96,8 @@ export interface TurnWords {
   noEmbedding(): string;
   /** The embedding model was asked and did not answer. */
   embedSilent(): string;
+  /** The model server could not be reached at all: it is off. Says so, and what to do. */
+  serverOff(): string;
   /** The model was asked and did not answer. */
   silent(): string;
   /** The model answered and nothing came of it. */
@@ -124,6 +126,12 @@ export interface TurnOptions {
    * server is this computer. False: such a sentence is for nobody.
    */
   followUp?: () => boolean;
+  /**
+   * Whether the model server can be reached at all; false only when it is off.
+   * Asked after the embedding model or the local model did not answer, to say
+   * so rather than "did not answer". Absent: always taken as reachable.
+   */
+  reachable?: () => Promise<boolean>;
   /** Gives the cloud model's endpoint the capabilities it may ask for. */
   publish?: (tools: unknown[]) => void;
   /**
@@ -316,6 +324,7 @@ export class VoiceTurns {
   private cloudTurn: Running | null = null;
   /** Said while a question was on screen, and a request of its own. */
   private nextSaid: string | null = null;
+  private reachable: () => Promise<boolean>;
 
   constructor(options: TurnOptions) {
     this.registry = options.registry;
@@ -326,6 +335,7 @@ export class VoiceTurns {
     this.cloud = options.cloud;
     this.publish = options.publish ?? (() => {});
     this.followUp = options.followUp ?? (() => false);
+    this.reachable = options.reachable ?? (async () => true);
     this.words = options.words;
     this.now = options.now ?? (() => Date.now());
     this.trace = options.trace ?? (() => {});
@@ -483,7 +493,8 @@ export class VoiceTurns {
     // No ranking, no guess: the embedding model is what finds which capabilities a sentence is about.
     if (!ranked) {
       if (!this.local()) return this.end(turn, "", this.words.noModel());
-      return this.end(turn, "", this.embedChosen() ? this.words.embedSilent() : this.words.noEmbedding());
+      if (!this.embedChosen()) return this.end(turn, "", this.words.noEmbedding());
+      return this.end(turn, "", await this.noAnswer(this.words.embedSilent()));
     }
     // Tier 1: the ranking names one capability, clearly. No model is asked — and not for a sentence that may be for nobody.
     const name = ranked && turn.taken ? instant(ranked, this.registry.all()) : null;
@@ -528,17 +539,30 @@ export class VoiceTurns {
       return this.end(turn, await this.checked(turn, came.words));
     }
     // What may have been said to someone else never goes further than this computer.
-    if (!turn.wake) return this.end(turn, "", came.is === "escalated" ? this.words.beyond() : this.words.silent());
+    if (!turn.wake) return this.end(turn, "", came.is === "escalated" ? this.words.beyond() : await this.noAnswer(this.words.silent()));
 
     // Tier 3: handed up, or the local model did not answer — when the user allowed a cloud model.
     const cloud = this.cloud();
-    if (!cloud) return this.end(turn, "", came.is === "escalated" ? this.words.beyond() : this.words.silent());
+    if (!cloud) return this.end(turn, "", came.is === "escalated" ? this.words.beyond() : await this.noAnswer(this.words.silent()));
     turn.how.waiting?.(this.words.askingCloud(), CLOUD_BUDGET_MS);
     this.trace(`cloud asked (${came.is})`);
     const words = await this.cloudly(cloud, turn);
     this.trace(words == null ? "cloud did not answer" : `cloud answered: ${JSON.stringify(words)}`);
     if (gone(turn)) return { result: null, taken: true, rest: false };
     return this.end(turn, await this.checked(turn, words ?? ""), words == null && !shownOf(turn).length ? this.words.silent() : undefined);
+  }
+
+  /**
+   * What is said when the model server's model did not answer: that the
+   * server is off when it cannot be reached at all (trying again would not
+   * help), else `usual`. A server that answers anything, or is slow, is there.
+   */
+  private async noAnswer(usual: string): Promise<string> {
+    try {
+      return (await this.reachable()) === false ? this.words.serverOff() : usual;
+    } catch {
+      return usual;
+    }
   }
 
   // ── The ranking ─────────────────────────────────────────────────────────────
