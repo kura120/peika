@@ -1076,6 +1076,7 @@ pub fn run() {
             voice_brain,
             voice::embed::voice_embed,
             voice::embed::voice_embed_models,
+            voice::embed::voice_server_reachable,
             web_search::web_search,
             capture::capture_from,
             capture::capture_cancel,

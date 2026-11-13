@@ -6395,6 +6395,39 @@
    "ru": "Модель эмбеддингов не ответила. Повторите чуть позже.",
    "id": "Model embedding tidak menjawab. Ucapkan lagi sebentar lagi."
   },
+  "The model server isn't running. Start {name} and try again.": {
+   "zh-Hans": "模型服务器未运行。请启动 {name} 后重试。",
+   "hi": "मॉडल सर्वर चालू नहीं है। {name} शुरू करें और फिर कोशिश करें।",
+   "es": "El servidor de modelos no está en marcha. Inicia {name} e inténtalo de nuevo.",
+   "ar": "خادم النماذج لا يعمل. شغّل {name} ثم حاول مرة أخرى.",
+   "fr": "Le serveur de modèles ne tourne pas. Lancez {name} et réessayez.",
+   "bn": "মডেল সার্ভার চালু নেই। {name} চালু করে আবার চেষ্টা করুন।",
+   "pt-BR": "O servidor de modelos não está em execução. Inicie o {name} e tente de novo.",
+   "ru": "Сервер моделей не запущен. Запустите {name} и повторите попытку.",
+   "id": "Server model tidak berjalan. Jalankan {name} lalu coba lagi."
+  },
+  "The model server isn't running. Start it and try again.": {
+   "zh-Hans": "模型服务器未运行。请启动它后重试。",
+   "hi": "मॉडल सर्वर चालू नहीं है। उसे शुरू करें और फिर कोशिश करें।",
+   "es": "El servidor de modelos no está en marcha. Inícialo e inténtalo de nuevo.",
+   "ar": "خادم النماذج لا يعمل. شغّله ثم حاول مرة أخرى.",
+   "fr": "Le serveur de modèles ne tourne pas. Lancez-le et réessayez.",
+   "bn": "মডেল সার্ভার চালু নেই। সেটি চালু করে আবার চেষ্টা করুন।",
+   "pt-BR": "O servidor de modelos não está em execução. Inicie-o e tente de novo.",
+   "ru": "Сервер моделей не запущен. Запустите его и повторите попытку.",
+   "id": "Server model tidak berjalan. Jalankan lalu coba lagi."
+  },
+  "The model server can't be reached. Check that it is running, then try again.": {
+   "zh-Hans": "无法连接到模型服务器。请确认它正在运行，然后重试。",
+   "hi": "मॉडल सर्वर तक पहुँचा नहीं जा सका। जाँचें कि वह चालू है, फिर कोशिश करें।",
+   "es": "No se puede conectar con el servidor de modelos. Comprueba que esté en marcha e inténtalo de nuevo.",
+   "ar": "تعذّر الوصول إلى خادم النماذج. تأكد من أنه يعمل ثم حاول مرة أخرى.",
+   "fr": "Impossible de joindre le serveur de modèles. Vérifiez qu'il fonctionne, puis réessayez.",
+   "bn": "মডেল সার্ভারে পৌঁছানো যাচ্ছে না। সেটি চালু আছে কি না দেখুন, তারপর আবার চেষ্টা করুন।",
+   "pt-BR": "Não foi possível acessar o servidor de modelos. Verifique se ele está em execução e tente de novo.",
+   "ru": "Не удаётся связаться с сервером моделей. Убедитесь, что он запущен, и повторите попытку.",
+   "id": "Server model tidak dapat dijangkau. Pastikan server berjalan, lalu coba lagi."
+  },
   "No embedding model is chosen yet: see “{row}” below.": {
    "zh-Hans": "尚未选择嵌入模型：请看下方的“{row}”。",
    "hi": "अभी तक कोई एम्बेडिंग मॉडल नहीं चुना गया: नीचे “{row}” देखें।",

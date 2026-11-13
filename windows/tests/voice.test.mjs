@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { IslandStateMachine } from "../src/island/fsm.ts";
-import { applyVoice, brainHere, decodeSpeech, speechGain, wakeBlocked } from "../src/island/voice.ts";
+import { applyVoice, brainHere, decodeSpeech, serverOffWords, speechGain, wakeBlocked } from "../src/island/voice.ts";
 import { VIEW_LAYOUTS, islandSize } from "../src/core/layout.ts";
 import { isCard, isPlace } from "../src/island/restore.ts";
 import { SHORTCUTS, activeKeys } from "../src/core/shortcuts.ts";
@@ -219,4 +219,20 @@ test("voice is off by default, with the wake phrase ready for when it is turned 
     embedModel: "", cloud: false, webAnswers: false, webSearch: "browser", debugLog: false,
   });
   assert.equal(DEFAULT_SETTINGS.searchEngine, "google");
+});
+
+test("a model server that is off is said so, by name when it is a known one on this computer, and the words are short enough to be spoken", () => {
+  assert.equal(serverOffWords("ollama", true), "The model server isn't running. Start Ollama and try again.");
+  assert.equal(serverOffWords("lmstudio", true), "The model server isn't running. Start LM Studio and try again.");
+  assert.equal(serverOffWords("custom", true), "The model server isn't running. Start it and try again.");
+  // Not this computer: nothing to start here, whatever kind of server it is.
+  for (const brain of ["ollama", "lmstudio", "custom"]) {
+    assert.equal(serverOffWords(brain, false), "The model server can't be reached. Check that it is running, then try again.");
+  }
+  // Peika's voice says at most 220 characters (src-tauri/src/voice/speak.rs).
+  for (const [brain, here] of [["ollama", true], ["lmstudio", true], ["custom", true], ["custom", false]]) {
+    const words = serverOffWords(brain, here);
+    assert.ok(words.length <= 220);
+    assert.ok(!/\b(API|endpoint|port|localhost)\b/i.test(words));
+  }
 });

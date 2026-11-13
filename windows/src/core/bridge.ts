@@ -327,6 +327,13 @@ export const Bridge = {
   /** The embedding models the server chosen for voice has, by name (Settings). */
   voiceEmbedModels: () => call<string[]>("voice_embed_models"),
   /**
+   * Whether the model server chosen for voice can be reached at all: false only
+   * when no connection could be made (it is off). Asked after a failure, to say
+   * "the server is off" rather than "the model did not answer". Null in the
+   * browser preview, or when the app did not answer: nothing is known.
+   */
+  voiceServerReachable: () => call<boolean>("voice_server_reachable"),
+  /**
    * Searches the web with Brave Search and the user's key: eight results at
    * most, as plain text. Throws what went wrong, in words to show; and always
    * unless `voice.webSearch` is "brave".

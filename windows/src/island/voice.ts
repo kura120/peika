@@ -143,6 +143,21 @@ function debugTrace(line: string) {
   debugLines.push(line);
 }
 
+/**
+ * What Peika says when the model server chosen for voice cannot be reached at
+ * all. A server of this computer is named when it is a known one ("Start
+ * Ollama"), and told to be started; a custom one on this computer, with no
+ * name to give, is "it"; one that is not this computer is not something to
+ * start here, so it is only checked.
+ */
+export function serverOffWords(brain: string, here: boolean): string {
+  if (!here) return t("The model server can't be reached. Check that it is running, then try again.");
+  const name = brain === "ollama" ? "Ollama" : brain === "lmstudio" ? "LM Studio" : "";
+  return name
+    ? t("The model server isn't running. Start {name} and try again.", { name })
+    : t("The model server isn't running. Start it and try again.");
+}
+
 export function createTurns(registry: Registry): VoiceTurns {
   return new VoiceTurns({
     trace: debugTrace,
@@ -152,11 +167,13 @@ export function createTurns(registry: Registry): VoiceTurns {
     local: () => (brainChosen() ? (system, said, tools, history, steps) => Bridge.voiceBrain(system, said, tools, history, steps) : null),
     cloud: () => (State.settings.voice.cloud ? (system, said, history) => Bridge.voiceCloud(system, said, history) : null),
     followUp: () => brainChosen() && brainHere(),
+    reachable: async () => (await Bridge.voiceServerReachable()) !== false,
     publish: (tools) => void Bridge.capabilityPublish(tools),
     words: {
       noModel: () => t("Voice needs a model server. Choose one in Settings."),
       noEmbedding: () => t("Voice needs an embedding model. Choose one in Settings."),
       embedSilent: () => t("The embedding model did not answer. Say it again in a moment."),
+      serverOff: () => serverOffWords(State.settings.voice.brain, brainHere()),
       silent: () => t("The model did not answer."),
       notUnderstood: () => t("Command not recognised"),
       beyond: () => t("That is more than I can do here."),

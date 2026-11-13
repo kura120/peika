@@ -197,6 +197,25 @@ pub async fn embedding_models(server: &Server) -> Result<Vec<String>, String> {
     list(&url, server.key.as_deref(), Kind::Embedding).await
 }
 
+/// Whether anything answers at the server's address: only a connection that
+/// could not be made (refused, no route, name not found) says no. Any answer
+/// at all, an error status included, and a wait that ran out after connecting,
+/// say yes: the server is there, whatever it makes of the request. Nothing is
+/// sent but an empty model-list request, with no key. Voice asks it after a
+/// failure, to tell "the server is off" from "the model did not answer".
+pub async fn reachable(server: &Server, timeout: Duration) -> bool {
+    let Ok(base) = base_url(server) else { return true };
+    reachable_at(&base, timeout).await
+}
+
+async fn reachable_at(base: &Url, timeout: Duration) -> bool {
+    let Ok(client) = net::client(base, timeout) else { return true };
+    match client.get(net::join(base, "v1/models")).send().await {
+        Ok(_) => true,
+        Err(error) => !error.is_connect(),
+    }
+}
+
 /// `GET /v1/models`, the models of one kind, or why the server can't be reached.
 async fn list(base: &Url, key: Option<&str>, wanted: Kind) -> Result<Vec<String>, String> {
     let response = net::client(base, Duration::from_secs(5))?
@@ -552,6 +571,35 @@ mod tests {
         assert!(block_on(list(&url("http://127.0.0.1:1"), None, Kind::Chat)).unwrap_err().starts_with("Cannot reach"));
         let u = serve_once("401 Unauthorized", "Content-Length: 2\r\n", b"{}".to_vec());
         assert!(block_on(list(&url(&u), Some("bad"), Kind::Chat)).unwrap_err().contains("refused the key"));
+    }
+
+    #[test]
+    fn only_a_connection_that_cannot_be_made_is_unreachable() {
+        use std::io::Read;
+        const PROBE_FOR_TESTS: Duration = Duration::from_secs(4);
+        let wait = Duration::from_millis(800);
+        // Nothing listens: refused, at once.
+        let started = Instant::now();
+        assert!(!block_on(reachable_at(&url("http://127.0.0.1:9"), PROBE_FOR_TESTS)));
+        assert!(started.elapsed() < Duration::from_secs(4));
+        // An answer, whatever it is: reachable.
+        let u = serve_once("500 Internal Server Error", "Content-Length: 2\r\n", b"{}".to_vec());
+        assert!(block_on(reachable_at(&url(&u), wait)));
+        let u = serve_once("401 Unauthorized", "Content-Length: 0\r\n", Vec::new());
+        assert!(block_on(reachable_at(&url(&u), wait)));
+        // Connected and then silent: the server is there, it is slow, not off.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let u = format!("http://{}", listener.local_addr().unwrap());
+        let held = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = conn.read(&mut buf);
+            std::thread::sleep(Duration::from_millis(1500));
+        });
+        assert!(block_on(reachable_at(&url(&u), wait)));
+        held.join().unwrap();
+        // A server not connected yet is not "off" either: there is no address to try.
+        assert!(block_on(reachable(&server(&Settings::default(), "ollama").unwrap(), wait)));
     }
 
     #[test]
