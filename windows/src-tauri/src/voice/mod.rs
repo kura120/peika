@@ -798,13 +798,20 @@ impl Free {
 
     /// The sentence as the bundled model wrote it down, and how sure it was of
     /// each word; nothing when it is not here or will not load. A load under
-    /// way is waited for; one never started is done now (the model server was
-    /// asked first, and did not hear).
+    /// way is waited for, and one never started (the model server was asked
+    /// first, and did not hear) is started and waited for: never longer than
+    /// `MODEL_WAIT`.
     fn by_bundled(&mut self, samples: &[f32]) -> (String, Vec<f32>) {
         let Some(engine) = self.engine.as_mut() else { return Default::default() };
         match engine.get(MODEL_WAIT) {
             Ok(model) => model.item.transcribe_sure(vad::SAMPLE_RATE, samples),
-            Err(why) => {
+            // Slow, not broken: this sentence is lost, the load goes on, and
+            // the next one finds the model. Voice stays on.
+            Err(bundled::Unready::NotYet) => {
+                crate::log::line("voice: bundled engine: not ready in time");
+                Default::default()
+            }
+            Err(bundled::Unready::Failed(why)) => {
                 // Why not, never the words.
                 crate::log::line(format!("voice: bundled engine: {why}"));
                 // With no model server to hear either, nothing can: the

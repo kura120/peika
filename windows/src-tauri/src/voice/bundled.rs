@@ -21,6 +21,15 @@ enum State<T> {
     Here(T),
 }
 
+/// Why the model could not be had just now.
+#[derive(Debug, PartialEq)]
+pub enum Unready {
+    /// The wait ran out and the load goes on: the next sentence may find it.
+    NotYet,
+    /// The load failed, or its thread is gone: nothing is coming.
+    Failed(String),
+}
+
 pub struct Bundled<T: Send + 'static> {
     state: State<T>,
     load: Arc<dyn Fn() -> Result<T, String> + Send + Sync>,
@@ -54,26 +63,36 @@ impl<T: Send + 'static> Bundled<T> {
         }
     }
 
-    /// The model: waiting up to `wait` for one on its way, loading it now
-    /// when it is not coming. A wait that runs out leaves it coming, for the
-    /// next sentence. Why it cannot be had is for the caller to log.
-    pub fn get(&mut self, wait: Duration) -> Result<&T, String> {
-        match std::mem::replace(&mut self.state, State::Away) {
-            State::Here(item) => self.state = State::Here(item),
-            State::Loading(rx) => match rx.recv_timeout(wait) {
-                Ok(Ok(item)) => self.state = State::Here(item),
-                Ok(Err(why)) => return Err(why),
-                Err(RecvTimeoutError::Timeout) => {
-                    self.state = State::Loading(rx);
-                    return Err("it was not ready in time".into());
+    /// The model: waiting up to `wait` for it, whether it was already on its
+    /// way or is started now (so the wait covers every path, and the listener
+    /// is never held by a load that has no end). A wait that runs out leaves
+    /// it coming, for the next sentence. Why it cannot be had is for the
+    /// caller to log.
+    pub fn get(&mut self, wait: Duration) -> Result<&T, Unready> {
+        if matches!(self.state, State::Away) {
+            self.start();
+            // Only when no thread could be made: loaded here, on this one, as
+            // the last resort (nothing else can load it).
+            if matches!(self.state, State::Away) {
+                self.state = State::Here((self.load)().map_err(Unready::Failed)?);
+            }
+        }
+        if matches!(self.state, State::Loading(_)) {
+            if let State::Loading(rx) = std::mem::replace(&mut self.state, State::Away) {
+                match rx.recv_timeout(wait) {
+                    Ok(Ok(item)) => self.state = State::Here(item),
+                    Ok(Err(why)) => return Err(Unready::Failed(why)),
+                    Err(RecvTimeoutError::Timeout) => {
+                        self.state = State::Loading(rx);
+                        return Err(Unready::NotYet);
+                    }
+                    Err(RecvTimeoutError::Disconnected) => return Err(Unready::Failed("its loading stopped".into())),
                 }
-                Err(RecvTimeoutError::Disconnected) => return Err("its loading stopped".into()),
-            },
-            State::Away => self.state = State::Here((self.load)()?),
+            }
         }
         match &self.state {
             State::Here(item) => Ok(item),
-            _ => Err("it is not here".into()),
+            _ => Err(Unready::Failed("it is not here".into())),
         }
     }
 
@@ -140,10 +159,11 @@ mod tests {
 
     #[test]
     fn started_on_a_command_it_is_ready_by_the_time_it_is_needed() {
-        let (mut model, loads, _) = fake(150, false);
+        // A load of 500 ms: starting it must not take a tenth of that.
+        let (mut model, loads, _) = fake(500, false);
         let started = Instant::now();
         model.start();
-        assert!(started.elapsed() < Duration::from_millis(100), "start does not wait for the load");
+        assert!(started.elapsed() < Duration::from_millis(50), "start does not wait for the load");
         assert!(model.loading() && !model.here());
         assert_eq!(model.get(Duration::from_secs(3)).copied(), Ok(1));
         assert!(model.here());
@@ -154,25 +174,37 @@ mod tests {
 
     #[test]
     fn a_wait_that_runs_out_leaves_it_coming() {
-        let (mut model, _, _) = fake(300, false);
+        // A wait of 20 ms against a load of 500 ms.
+        let (mut model, _, _) = fake(500, false);
         model.start();
-        assert!(model.get(Duration::from_millis(20)).is_err());
-        assert!(model.loading());
-        assert_eq!(model.get(Duration::from_secs(3)).copied(), Ok(1));
+        assert_eq!(model.get(Duration::from_millis(20)).copied(), Err(Unready::NotYet));
+        assert!(model.loading(), "still coming");
+        // The next sentence finds it.
+        assert_eq!(model.get(Duration::from_secs(5)).copied(), Ok(1));
     }
 
     #[test]
-    fn a_model_not_started_is_loaded_when_needed() {
-        let (mut model, loads, _) = fake(0, false);
-        assert_eq!(model.get(Duration::from_secs(1)).copied(), Ok(1));
+    fn a_model_not_started_is_loaded_on_the_helper_thread_within_the_wait() {
+        let (mut model, loads, _) = fake(10, false);
+        assert_eq!(model.get(Duration::from_secs(5)).copied(), Ok(1));
         assert_eq!(loads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_model_not_started_and_slower_than_the_wait_is_not_yet_not_a_hang() {
+        let (mut model, _, _) = fake(500, false);
+        let asked = Instant::now();
+        assert_eq!(model.get(Duration::from_millis(20)).copied(), Err(Unready::NotYet));
+        assert!(asked.elapsed() < Duration::from_millis(250), "the wait was kept to");
+        assert!(model.loading());
+        assert_eq!(model.get(Duration::from_secs(5)).copied(), Ok(1));
     }
 
     #[test]
     fn a_failed_load_is_reported_once() {
         let (mut model, _, _) = fake(10, true);
         model.start();
-        assert_eq!(model.get(Duration::from_secs(3)).err().as_deref(), Some("no such file"));
+        assert_eq!(model.get(Duration::from_secs(5)).copied(), Err(Unready::Failed("no such file".into())));
         // Not here and not coming: nothing waits on it, nothing is reported again.
         assert!(!model.here() && !model.loading());
     }

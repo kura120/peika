@@ -170,36 +170,47 @@ mod tests {
         let (holder, loads) = (holder(20), Arc::new(AtomicUsize::new(0)));
         let first = holder.take(0, loader(&loads)).unwrap();
         holder.give_back(first);
-        sleep(Duration::from_millis(300));
+        // 20 ms kept, looked at after 400 ms.
+        sleep(Duration::from_millis(400));
         let again = holder.take(0, loader(&loads)).unwrap();
         assert_eq!((again.item, loads.load(Ordering::SeqCst)), (2, 2), "loaded again");
     }
 
+    // The next two call the timer's own step with the generation it was
+    // started for, instead of racing a real timer: the keep time is a minute,
+    // so no real one fires.
     #[test]
     fn the_timer_of_an_earlier_give_back_does_not_undo_a_later_one() {
-        let (holder, loads) = (holder(300), Arc::new(AtomicUsize::new(0)));
+        let (holder, loads) = (holder(60_000), Arc::new(AtomicUsize::new(0)));
         let first = holder.take(0, loader(&loads)).unwrap();
         holder.give_back(first);
-        sleep(Duration::from_millis(100));
-        // Taken and given back again: the first timer (at 300 ms) is stale.
+        let earlier = holder.generation.load(Ordering::SeqCst);
         let used = holder.take(0, loader(&loads)).unwrap();
         holder.give_back(used);
-        sleep(Duration::from_millis(250));
+        // The first timer is stale: the model was used since.
+        holder.let_go_if(earlier);
+        assert!(holder.kept().is_some(), "still kept");
         let again = holder.take(0, loader(&loads)).unwrap();
-        assert_eq!((again.item, loads.load(Ordering::SeqCst)), (1, 1), "still the first, not reloaded");
+        assert_eq!((again.item, loads.load(Ordering::SeqCst)), (1, 1), "not reloaded");
+        holder.give_back(again);
+        // The last timer is not stale: it lets the model go.
+        holder.let_go_if(holder.generation.load(Ordering::SeqCst));
+        assert!(holder.kept().is_none());
     }
 
     #[test]
     fn a_take_is_not_undone_by_a_pending_timer() {
-        let (holder, loads) = (holder(100), Arc::new(AtomicUsize::new(0)));
+        let (holder, loads) = (holder(60_000), Arc::new(AtomicUsize::new(0)));
         let first = holder.take(0, loader(&loads)).unwrap();
         holder.give_back(first);
+        let earlier = holder.generation.load(Ordering::SeqCst);
         let taken = holder.take(0, loader(&loads)).unwrap();
-        sleep(Duration::from_millis(300));
-        // The timer ran while it was out: nothing of it was dropped, nothing is kept.
+        // The timer fires while the model is out: nothing is kept to drop.
+        holder.let_go_if(earlier);
         assert_eq!(taken.item, 1);
-        assert!(holder.kept().is_none());
         holder.give_back(taken);
+        // And it does not undo the give-back that came after.
+        holder.let_go_if(earlier);
         assert!(holder.kept().is_some());
     }
 
