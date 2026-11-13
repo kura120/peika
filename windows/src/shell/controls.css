@@ -1,0 +1,182 @@
+/* Basic controls of the plain theme. Weights are 400, 500 and 600 only.
+   The .is-hover and .is-focus classes exist so a preview page can show a
+   state without a pointer or the keyboard. */
+
+.pk-text {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+.pk-mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.pk-btn,
+.pk-icon-btn,
+.pk-chip-x,
+.pk-switch {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+/* One focus ring for every control. */
+.pk-btn:focus-visible, .pk-btn.is-focus,
+.pk-icon-btn:focus-visible, .pk-icon-btn.is-focus,
+.pk-chip-x:focus-visible, .pk-chip-x.is-focus,
+.pk-switch:focus-visible, .pk-switch.is-focus,
+.pk-field:focus-within, .pk-field.is-focus {
+  outline: 2px solid var(--iris);
+  outline-offset: 2px;
+}
+
+.pk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--r-btn);
+  border: 1px solid var(--btn-border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.pk-btn:hover:not(:disabled), .pk-btn.is-hover { background: var(--row-selected); }
+
+/* The label sits on the iris fill in the surface colour: white in light, and
+   dark in dark, where white on the light iris is too faint to read. */
+.pk-btn-primary {
+  background: var(--iris);
+  border-color: var(--iris);
+  color: var(--surface);
+}
+.pk-btn-primary:hover:not(:disabled), .pk-btn-primary.is-hover {
+  background: var(--iris-hover);
+  border-color: var(--iris-hover);
+}
+
+.pk-btn-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.pk-btn:disabled, .pk-icon-btn:disabled, .pk-chip-x:disabled, .pk-switch:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.pk-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.pk-icon-btn:hover:not(:disabled), .pk-icon-btn.is-hover { background: var(--row-selected); color: var(--text); }
+
+.pk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: 13px;
+  background: var(--chip);
+  color: var(--text);
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 12.5px;
+}
+.pk-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.pk-chip-x:hover:not(:disabled), .pk-chip-x.is-hover { background: var(--btn-border); color: var(--text); }
+
+.pk-switch {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--switch-off);
+}
+.pk-switch[aria-checked="true"] { background: var(--iris); }
+.pk-switch:hover:not(:disabled), .pk-switch.is-hover { filter: brightness(.94); }
+.pk-switch-knob {
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #FFFFFF;
+  transform: translateX(0);
+}
+.pk-switch[aria-checked="true"] .pk-switch-knob { transform: translateX(16px); }
+
+.pk-field {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 6px 0 14px;
+  border: 1px solid var(--btn-border);
+  border-radius: var(--r-field);
+  background: var(--surface);
+}
+.pk-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+.pk-field input::placeholder { color: var(--text-muted); opacity: 1; }
+.pk-field:hover:not(.is-disabled), .pk-field.is-hover { border-color: var(--text-muted); }
+.pk-field.is-disabled { opacity: .5; }
+
+/* Present for screen readers, not drawn. */
+.pk-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pk-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--iris);
+}
+.pk-dot-row { width: 8px; height: 8px; }
+.pk-dot-closed { width: 7px; height: 7px; }
+
+/* The dot's drawings take their colour from the text colour. */
+.pk-dot-svg { color: var(--iris); display: block; }
+.pk-dot-amber { color: var(--amber); }

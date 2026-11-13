@@ -1,0 +1,42 @@
+// English sample strings for the preview page. Real strings and their
+// translations live in src/i18n and are not touched here.
+
+export const TEXT = {
+  pageTitle: "Theme preview",
+  light: "Light",
+  dark: "Dark",
+  colours: "Colours",
+  type: "Type",
+  controls: "Controls",
+  dots: "The dot",
+  island: "Closed island",
+  states: ["Rest", "Hover", "Focus", "Disabled"],
+  placeholder: "Ask, or tell Peika what to do",
+  fieldLabel: "Message to Peika",
+  allow: "Allow",
+  deny: "Deny",
+  always: "Always",
+  seesFile: "Sees VS Code · views.ts",
+  command: "npm test",
+  fileName: "views.ts",
+  chip: "VS Code",
+  chipRemove: "Remove VS Code",
+  switchLabel: "Show on every screen",
+  dotNames: ["Resting", "Listening", "Thinking", "Pointing", "Acting", "Needs you"],
+  talking: "Talking",
+  closedIsland: "One dot, on the desktop",
+  sizes: [
+    { px: 12.5, label: "12.5 px: chips and small notes" },
+    { px: 13.5, label: "13.5 px: buttons and rows" },
+    { px: 14, label: "14 px: fields and body text" },
+    { px: 14.5, label: "14.5 px: replies" },
+  ],
+  title: "Title, 600 weight",
+  agentNames: ["Claude Code", "Gemini CLI", "Codex", "Plain model"],
+  roles: [
+    "Neutral: yours and the system's",
+    "Iris: Peika's own",
+    "Amber: needs you",
+    "Red: failed",
+  ],
+} as const;

@@ -1,0 +1,97 @@
+/* The plain theme's colours and shapes. Light is the base; dark is set three
+   ways so the page follows the system, and a panel or the page can force
+   either one with data-theme. */
+
+:root,
+[data-theme="light"] {
+  --bg-desktop: #C5CCD4;
+  --surface: #FFFFFF;
+  --border: #D9DDE2;
+  --border-soft: #DFE2E6;
+  --divider: #E6E8EB;
+  --row-selected: #EDEFF2;
+  --field: #F1F2F5;
+  --chip: #E3E6EA;
+  --code: #F3F4F6;
+  --btn-border: #CDD2D8;
+  --text: #17191C;
+  --text-muted: #5A6068;
+  --iris: #5B4FE9;
+  --iris-hover: #2F27A8;
+  --iris-tint: #EEEDFD;
+  --iris-tint-border: #CBC6F7;
+  --iris-tint-text: #3F36B8;
+  --amber: #E0780B;
+  --amber-tint: #FFF1DB;
+  --amber-text: #7A3B00;
+  --red: #C4292B;
+  --switch-off: #B4BAC2;
+  --shadow-island: 0 1px 2px rgba(20,24,28,.06), 0 10px 28px rgba(20,24,28,.14);
+  --shadow-card: 0 1px 2px rgba(20,24,28,.06), 0 10px 28px rgba(20,24,28,.12);
+
+  /* The island hangs from the screen's edge: square top, no top border. */
+  --r-island: 0 0 16px 16px;
+  --r-card: 14px;
+  --r-btn: 8px;
+  --r-field: 10px;
+  --r-line: 12px;
+  --r-row: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Not when light is forced on the page. */
+  :root:not([data-theme="light"]) {
+    --bg-desktop: #2A2D33;
+    --surface: #1E2024;
+    --border: #383C43;
+    --border-soft: #383C43;
+    --divider: #2E3238;
+    --row-selected: #2A2D33;
+    --field: #272A30;
+    --chip: #2F3339;
+    --code: #26292E;
+    --btn-border: #454A52;
+    --text: #ECEEF1;
+    --text-muted: #A9B0B8;
+    --iris: #8E85FF;
+    --iris-hover: #B0A9FF;
+    --iris-tint: #2A2750;
+    --iris-tint-border: #3F3A80;
+    --iris-tint-text: #C9C4FF;
+    --amber: #F29A38;
+    --amber-tint: #3A2A12;
+    --amber-text: #FFC989;
+    --red: #FF6B6D;
+    --switch-off: #4A4F57;
+    --shadow-island: 0 10px 28px rgba(0,0,0,.4);
+    --shadow-card: 0 10px 28px rgba(0,0,0,.4);
+  }
+}
+
+:root[data-theme="dark"],
+[data-theme="dark"] {
+  --bg-desktop: #2A2D33;
+  --surface: #1E2024;
+  --border: #383C43;
+  --border-soft: #383C43;
+  --divider: #2E3238;
+  --row-selected: #2A2D33;
+  --field: #272A30;
+  --chip: #2F3339;
+  --code: #26292E;
+  --btn-border: #454A52;
+  --text: #ECEEF1;
+  --text-muted: #A9B0B8;
+  --iris: #8E85FF;
+  --iris-hover: #B0A9FF;
+  --iris-tint: #2A2750;
+  --iris-tint-border: #3F3A80;
+  --iris-tint-text: #C9C4FF;
+  --amber: #F29A38;
+  --amber-tint: #3A2A12;
+  --amber-text: #FFC989;
+  --red: #FF6B6D;
+  --switch-off: #4A4F57;
+  --shadow-island: 0 10px 28px rgba(0,0,0,.4);
+  --shadow-card: 0 10px 28px rgba(0,0,0,.4);
+}
