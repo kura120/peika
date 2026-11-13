@@ -4,7 +4,8 @@
 // It runs on a thread of its own, holding the microphone's lease (mic.rs), so
 // "OK Peika" stands aside meanwhile. The microphone opens first and what it
 // hears is kept while the hearing model loads, so the first words are not
-// lost; the model then stays loaded a little while after, for the next one.
+// lost; the model (speech/models.rs, shared with voice) then stays loaded a little
+// while after, for the next one.
 // Sentences are cut by the voice detector (vad.rs) and written down as each
 // ends; while one is being said, it is written down again every so often, so
 // the words show as they come.
@@ -37,9 +38,6 @@ const PARTIAL_EVERY_LONG: Duration = Duration::from_millis(2000);
 const LEVEL_EVERY: Duration = Duration::from_millis(66);
 /// Nobody dictates for this long: past it, the dictation ends by itself.
 const LONGEST: Duration = Duration::from_secs(600);
-/// How long the hearing model stays loaded after a dictation.
-#[cfg_attr(not(windows), allow(dead_code))]
-const MODEL_KEPT: Duration = Duration::from_secs(120);
 
 const fn vad_rate() -> usize {
     super::vad::SAMPLE_RATE as usize
@@ -237,7 +235,7 @@ pub fn cancel(id: u64) {
 
 #[cfg(windows)]
 fn run<R: Runtime>(app: &AppHandle<R>, id: u64, order: &AtomicU8) -> Result<Option<String>, String> {
-    use super::{capture, mic, sherpa, vad};
+    use super::{capture, mic, models, sherpa, vad};
 
     let _lease = mic::claim(mic::Owner::Dictation);
     let mut microphone = capture::Capture::open().map_err(|e| format!("{e:?}"))?;
@@ -251,7 +249,7 @@ fn run<R: Runtime>(app: &AppHandle<R>, id: u64, order: &AtomicU8) -> Result<Opti
         .unwrap_or_default();
 
     let started = Instant::now();
-    let mut dictator = Dictator::new(&model.engine, sentences);
+    let mut dictator = Dictator::new(&model.item, sentences);
     let mut last_level = Instant::now();
     let mut level = vad::Level::default();
     let outcome = loop {
@@ -288,52 +286,6 @@ fn run<R: Runtime>(app: &AppHandle<R>, id: u64, order: &AtomicU8) -> Result<Opti
 #[cfg(not(windows))]
 fn run<R: Runtime>(_app: &AppHandle<R>, _id: u64, _order: &AtomicU8) -> Result<Option<String>, String> {
     Err("Dictation is not on this system yet.".into())
-}
-
-/// The hearing model, loaded once and kept a while for the next dictation.
-#[cfg(windows)]
-mod models {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
-
-    use super::{engine, MODEL_KEPT};
-    use crate::speech::sherpa::Engine;
-
-    pub struct Loaded {
-        pub engine: Engine,
-        which: usize,
-    }
-
-    static KEPT: Mutex<Option<Loaded>> = Mutex::new(None);
-    static GENERATION: AtomicU64 = AtomicU64::new(0);
-
-    fn chosen() -> usize {
-        engine::HEARING_MODELS.iter().position(|m| std::ptr::eq(m, engine::hearing())).unwrap_or(0)
-    }
-
-    /// The kept model if it is still the chosen one, else loaded now.
-    pub fn take() -> Result<Loaded, String> {
-        GENERATION.fetch_add(1, Ordering::SeqCst);
-        let which = chosen();
-        if let Some(kept) = KEPT.lock().unwrap().take().filter(|k| k.which == which) {
-            return Ok(kept);
-        }
-        let model = engine::hearing();
-        let engine = Engine::load(&engine::runtime_dir(), &engine::model_dir(engine::Part::Hearing), model.family)?;
-        Ok(Loaded { engine, which })
-    }
-
-    /// Kept for MODEL_KEPT, then unloaded if no dictation took it meanwhile.
-    pub fn give_back(model: Loaded) {
-        let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-        *KEPT.lock().unwrap() = Some(model);
-        std::thread::spawn(move || {
-            std::thread::sleep(MODEL_KEPT);
-            if GENERATION.load(Ordering::SeqCst) == generation {
-                KEPT.lock().unwrap().take();
-            }
-        });
-    }
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────

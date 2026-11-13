@@ -10,6 +10,8 @@
 //   user's folder and pinned by SHA-256.
 // - sherpa.rs: sherpa-onnx, loaded from that folder as a DLL. Nothing of it is
 //   linked into the installer.
+// - models.rs: the hearing model once loaded, kept a while and shared by voice
+//   and dictation.
 // - capture.rs: the default microphone through WASAPI, 16 kHz mono (Windows).
 // - vad.rs: sentences cut out of what the microphone hears.
 // - mic.rs: who listens. WASAPI lets several readers share the microphone, so
@@ -26,6 +28,7 @@ pub mod capture;
 pub mod dictate;
 pub mod engine;
 pub mod mic;
+pub mod models;
 pub mod sherpa;
 pub mod vad;
 

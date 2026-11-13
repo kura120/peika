@@ -58,6 +58,8 @@
 // the microphone hears (0…1), for the glow under the island.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+#[cfg(windows)]
+use std::sync::Arc;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -70,6 +72,7 @@ use crate::settings::{Settings, VoicePref};
 mod apps;
 pub mod ask_keys;
 pub mod brain;
+mod bundled;
 pub mod cloud;
 pub mod debug;
 pub mod embed;
@@ -87,7 +90,9 @@ mod session;
 // service's, shared with dictation and the Notetaker (src/speech/).
 #[cfg(windows)]
 use crate::speech::capture;
-use crate::speech::{engine, sherpa, vad};
+use crate::speech::{engine, vad};
+#[cfg(windows)]
+use crate::speech::{models, sherpa};
 
 #[cfg(windows)]
 use sapi::Recogniser;
@@ -103,6 +108,12 @@ const LEVEL_EVERY: Duration = Duration::from_millis(66);
 const POLL: Duration = Duration::from_millis(200);
 /// How often the lock screen and battery saver are looked at.
 const HOLD_CHECK: Duration = Duration::from_secs(2);
+/// The longest a sentence waits for the bundled model to finish loading. It
+/// is started when the command begins, so this is for a slow disk or a
+/// sentence said in one breath with the wake phrase; past it, the sentence is
+/// given up rather than the listener left standing.
+#[cfg(windows)]
+const MODEL_WAIT: Duration = Duration::from_secs(15);
 
 /// Why nothing can listen here.
 #[derive(Debug)]
@@ -627,8 +638,14 @@ fn tell(app: &AppHandle, heard: Heard) {
 /// what writes it down.
 #[cfg(windows)]
 struct Free {
-    /// The bundled model; None when only the model server hears.
-    engine: Option<sherpa::Engine>,
+    /// The bundled model, which is not held from the start: it is loaded when
+    /// a command is coming (`prepare`), and given back to the shared holder
+    /// (speech/models.rs) when listening for one ends, which lets it go after
+    /// a quiet time. None when only the model server hears.
+    engine: Option<bundled::Bundled<models::Loaded>>,
+    /// The bundled model could not be had for a sentence and no model server
+    /// can hear in its place: `cannot_hear` tells the listener, once.
+    failed: bool,
     /// Set when the model server is asked first (hear.rs): where the settings
     /// are, which say at every sentence whether it still may be.
     server: Option<AppHandle>,
@@ -677,14 +694,10 @@ impl Free {
                 vad::Sentences::default()
             }
         };
-        let engine = bundled
-            .then(|| sherpa::Engine::load(&engine::runtime_dir(), &engine::model_dir(engine::Part::Hearing), engine::hearing().family))
-            .and_then(|loaded| loaded.map_err(|why| crate::log::line(format!("voice: bundled engine: {why}"))).ok());
-        if engine.is_none() && server.is_none() {
-            return Err(Unavailable::NoEngine);
-        }
+        // Only checked to be installed here: the model itself is loaded when a command comes.
+        let engine = bundled.then(|| bundled::Bundled::new(Arc::new(models::take), Arc::new(models::give_back)));
         let names = if server.is_some() { hear::names(apps::installed_lately().iter().map(|app| app.name.as_str())) } else { Vec::new() };
-        let free = Self { engine, server, names, capture: None, sentences, buffer: Vec::new(), recent: None, after_wake: None, peak: 0.0 };
+        let free = Self { engine, failed: false, server, names, capture: None, sentences, buffer: Vec::new(), recent: None, after_wake: None, peak: 0.0 };
         free.warm();
         Ok(free)
     }
@@ -700,6 +713,29 @@ impl Free {
         if let Some(Ok(ear)) = self.asked().map(|settings| hear::ear(&settings)) {
             hear::warm(ear);
         }
+    }
+
+    /// A command is coming and the bundled model is the one that writes it
+    /// down (no model server is asked first): it starts loading, on a thread
+    /// of its own, so it is ready by the time the sentence has been said.
+    fn prepare(&mut self) {
+        if self.server.is_none() {
+            if let Some(engine) = self.engine.as_mut() {
+                engine.start();
+            }
+        }
+    }
+
+    /// Listening for a command is over: the model goes back to the holder.
+    fn release(&mut self) {
+        if let Some(engine) = self.engine.as_mut() {
+            engine.release();
+        }
+    }
+
+    /// Nothing could write the last sentence down and nothing will: told once.
+    fn cannot_hear(&mut self) -> bool {
+        std::mem::take(&mut self.failed)
     }
 
     /// The sentence as the model server wrote it down, when it is asked and
@@ -739,14 +775,14 @@ impl Free {
         self.after_wake = None;
     }
 
-    fn written(&self, samples: &[f32]) -> Raw {
+    fn written(&mut self, samples: &[f32]) -> Raw {
         let samples = vad::fitting(samples);
         // The model server first when it is the speech model; the bundled
         // model for what it did not hear, and nothing when there is neither.
         // Only the bundled model says how sure it is of each word.
         let (heard, sure) = match self.by_server(samples) {
             Some(heard) => (heard, Vec::new()),
-            None => self.engine.as_ref().map(|engine| engine.transcribe_sure(vad::SAMPLE_RATE, samples)).unwrap_or_default(),
+            None => self.by_bundled(samples),
         };
         let text = session::without_wake(&heard);
         // The wake phrase said again was taken off the front: its words' too.
@@ -760,9 +796,28 @@ impl Free {
         }
     }
 
+    /// The sentence as the bundled model wrote it down, and how sure it was of
+    /// each word; nothing when it is not here or will not load. A load under
+    /// way is waited for; one never started is done now (the model server was
+    /// asked first, and did not hear).
+    fn by_bundled(&mut self, samples: &[f32]) -> (String, Vec<f32>) {
+        let Some(engine) = self.engine.as_mut() else { return Default::default() };
+        match engine.get(MODEL_WAIT) {
+            Ok(model) => model.item.transcribe_sure(vad::SAMPLE_RATE, samples),
+            Err(why) => {
+                // Why not, never the words.
+                crate::log::line(format!("voice: bundled engine: {why}"));
+                // With no model server to hear either, nothing can: the
+                // listener gives up as it does at the start (`NoEngine`).
+                self.failed = self.server.is_none();
+                Default::default()
+            }
+        }
+    }
+
     /// What was said after the wake phrase in the sentence that had it, or
     /// None when it was the wake phrase alone.
-    fn tail(&self, sentence: &[f32], wake: Duration) -> Option<Raw> {
+    fn tail(&mut self, sentence: &[f32], wake: Duration) -> Option<Raw> {
         let from = vad::after_wake(sentence.len(), wake)?;
         match self.written(&sentence[from..]) {
             // Only the end of "peika" was in there: not a command that was missed.
@@ -843,6 +898,14 @@ impl Free {
 
     fn warm(&self) {}
 
+    fn prepare(&mut self) {}
+
+    fn release(&mut self) {}
+
+    fn cannot_hear(&mut self) -> bool {
+        false
+    }
+
     fn same_breath(&mut self, _wake: Duration) -> Option<Raw> {
         None
     }
@@ -921,6 +984,12 @@ fn listen(app: &AppHandle, generation: u64, plan: Plan, rx: &Receiver<Control>) 
 
         let want = session.listen();
         if want != ear {
+            // The command and the time another may follow are over, or voice
+            // stands aside for a dictation (which then takes the same copy
+            // rather than load a second): the hearing model goes back to be kept.
+            if listens_freely(ear) && !listens_freely(want) {
+                free.release();
+            }
             // Windows' recogniser only ever hears the wake phrase: it is off
             // through a command and the time another may follow.
             let mut turned = recogniser.listen(want);
@@ -931,6 +1000,7 @@ fn listen(app: &AppHandle, generation: u64, plan: Plan, rx: &Receiver<Control>) 
                 if want == Listen::Command {
                     free.say_next();
                     free.warm();
+                    free.prepare();
                     if !std::mem::take(&mut same_breath) {
                         free.start_over();
                     }
@@ -993,6 +1063,12 @@ fn listen(app: &AppHandle, generation: u64, plan: Plan, rx: &Receiver<Control>) 
                         return give_up(app, generation, why);
                     }
                 }
+                if free.cannot_hear() {
+                    if ear == Listen::Command {
+                        tell(app, Heard::Cancelled);
+                    }
+                    return give_up(app, generation, Unavailable::NoEngine);
+                }
                 if hushed {
                     free.start_over();
                 } else if freely && free.speaking() {
@@ -1033,9 +1109,20 @@ fn listen(app: &AppHandle, generation: u64, plan: Plan, rx: &Receiver<Control>) 
                         tell(app, heard);
                     }
                 }
+                // The model did not load, for a command said in one breath with
+                // the wake phrase: the island was told Peika woke, and is told it is over.
+                if free.cannot_hear() {
+                    tell(app, Heard::Cancelled);
+                    return give_up(app, generation, Unavailable::NoEngine);
+                }
             }
         }
     }
+}
+
+/// Whether the bundled model is what a state listens with.
+fn listens_freely(listen: Listen) -> bool {
+    matches!(listen, Listen::Command | Listen::FollowUp)
 }
 
 fn apply(
